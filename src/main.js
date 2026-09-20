@@ -563,7 +563,7 @@ function undoLastLeave() {
 function setAudioKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.audioKeybinds[personId];
-  if (!/^[a-z0-9]$/i.test(normalized)) return;
+  if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
   Object.keys(state.audioKeybinds).forEach(function(id) {
     if (id !== personId && state.audioKeybinds[id] === normalized) delete state.audioKeybinds[id];
   });
