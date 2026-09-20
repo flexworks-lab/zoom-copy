@@ -760,7 +760,7 @@ function renderParticipants() {
   const myVideos = state.myVideos || [];
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
-    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
+    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>Participant</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
     '<div class="participant-list">' +
@@ -1429,7 +1429,10 @@ function drawRecordingFrame() {
         ctx.textAlign = "left";
         ctx.fillStyle = "#1b2632";
         ctx.font = "700 10px system-ui, sans-serif";
-        ctx.fillText(me.name, px + 55, py + 12);
+        ctx.fillText(me.name, px + 55, py + 11);
+        ctx.fillStyle = "#8e98a4";
+        ctx.font = "8px system-ui, sans-serif";
+        ctx.fillText("Participant", px + 55, py + 24);
         py += 40;
       }
 
@@ -1468,7 +1471,8 @@ function drawRecordingFrame() {
         py += 40;
       });
 
-      // No "Me" row and no "Add fake person" row are included in recordings.
+      // The recorded Participants panel includes Me by name and role, but
+      // does not include the Add fake person control.
     } else if (state.chatOpen) {
       ctx.fillStyle = "#1b2632";
       ctx.textAlign = "left";
