@@ -157,6 +157,89 @@ function getParticipant(personId) {
   return state.fakePeople.find(function(p) { return p.id === personId; }) || null;
 }
 
+function switchParticipantVideoInPlace(personId) {
+  const person = getParticipant(personId);
+  if (!person) return;
+
+  const videoUrl = getCurrentVideoUrl(person);
+  if (!videoUrl) {
+    updateParticipantTile(personId);
+    return;
+  }
+
+  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
+  const currentVideo = tile && tile.querySelector("video.participant-video");
+
+  if (!tile || !currentVideo) {
+    updateParticipantTile(personId);
+    return;
+  }
+
+  const nextVideo = document.createElement("video");
+  nextVideo.className = "participant-video participant-video-next";
+  nextVideo.dataset.personId = personId;
+  nextVideo.dataset.videoUrl = videoUrl;
+  nextVideo.src = videoUrl;
+  nextVideo.autoplay = false;
+  nextVideo.playsInline = true;
+  nextVideo.muted = !state.audioEnabled || !isPersonAudioOn(person);
+  nextVideo.volume = 1;
+
+  nextVideo.style.position = "absolute";
+  nextVideo.style.inset = "0";
+  nextVideo.style.width = "100%";
+  nextVideo.style.height = "100%";
+  nextVideo.style.objectFit = "contain";
+  nextVideo.style.background = "#05080d";
+  nextVideo.style.opacity = "0";
+  nextVideo.style.zIndex = "1";
+  nextVideo.style.transition = "opacity 100ms ease";
+
+  currentVideo.style.transition = "opacity 100ms ease";
+  currentVideo.style.zIndex = "0";
+
+  tile.insertBefore(nextVideo, tile.firstChild);
+
+  let finished = false;
+  const finish = function() {
+    if (finished || nextVideo.readyState < 2) return;
+    finished = true;
+
+    nextVideo.style.opacity = "1";
+    currentVideo.style.opacity = "0";
+
+    setTimeout(function() {
+      currentVideo.pause();
+      currentVideo.remove();
+      nextVideo.classList.remove("participant-video-next");
+      nextVideo.style.position = "";
+      nextVideo.style.inset = "";
+      nextVideo.style.width = "";
+      nextVideo.style.height = "";
+      nextVideo.style.opacity = "";
+      nextVideo.style.zIndex = "";
+      nextVideo.style.transition = "";
+    }, 120);
+
+    updateParticipantsListOnly();
+    syncAudioIndicator();
+    if (state.recording) syncRecordingAudio();
+  };
+
+  nextVideo.addEventListener("loadeddata", function() {
+    nextVideo.play().then(finish).catch(function() {
+      finish();
+    });
+  }, { once: true });
+
+  nextVideo.addEventListener("error", function() {
+    nextVideo.remove();
+    updateParticipantTile(personId);
+  }, { once: true });
+
+  nextVideo.load();
+}
+
 function advancePersonVideo(personId) {
   const person = getParticipant(personId);
   if (!person) return false;
@@ -180,7 +263,11 @@ function advancePersonVideo(personId) {
     target.needsNextOnCamera = false;
   }
 
-  updateParticipantTile(personId);
+  if (wasVisible) {
+    switchParticipantVideoInPlace(personId);
+  } else {
+    updateParticipantTile(personId);
+  }
   updateParticipantsListOnly();
   if (state.recording) syncRecordingAudio();
   return true;
