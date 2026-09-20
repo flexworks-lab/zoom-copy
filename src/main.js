@@ -391,7 +391,6 @@ function leaveMeetingAsMe() {
     stopRecording();
   }
 
-  render();
   state.page = "home";
   render();
   return true;
