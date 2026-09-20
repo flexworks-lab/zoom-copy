@@ -1733,6 +1733,41 @@ function togglePersonClip(personId) {
   return true;
 }
 
+function restartAllClips() {
+  const people = getRecordingPeople();
+  const peopleWithVideos = people.filter(function(person) {
+    return getVideos(person).length;
+  });
+  if (!peopleWithVideos.length) return false;
+
+  peopleWithVideos.forEach(function(person) {
+    state.clipPaused[person.id] = false;
+    if (person.id === "me") {
+      state.cameraHidden.me = false;
+      state.cameraOn = true;
+      state.needsNextOnCamera = false;
+    } else {
+      person.cameraVisible = true;
+      person.needsNextOnCamera = false;
+    }
+  });
+
+  render();
+
+  document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
+    const personId = video.dataset.personId;
+    try { video.currentTime = 0; } catch (error) {}
+    state.clipPaused[personId] = false;
+    video.play().catch(function() {});
+    updateClipControlLabels(personId);
+  });
+
+  syncAudioIndicator();
+  if (state.recording) syncRecordingAudio();
+  queueMeetingSave();
+  return true;
+}
+
 function togglePauseAllVideos() {
   const videos = Array.from(document.querySelectorAll("video.participant-video[data-person-id]"));
   if (!videos.length) return false;
@@ -1926,6 +1961,7 @@ function renderParticipants() {
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
     (state.participantOptionsOpen ? '<div class="participant-options"><div class="participant-options-title"><strong>Participant options</strong><button class="options-close" data-action="toggle-participant-options">Done</button></div>' +
       '<div class="global-video-shortcut"><div><strong>Pause / resume all videos</strong><small>Toggle every active clip with one key.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
+      '<div class="global-video-shortcut"><div><strong>Restart all clips</strong><small>Press / to restart every active clip.</small></div><span class="global-key-static">/</span></div>' +
       (state.leaveHistory.length ? '<button class="join-back-button" data-action="join-back"><span>↩</span><strong>Join Back</strong><small>Restore the last person who left with the same setup</small></button>' : '') +
       '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div></div>' : '') +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
@@ -3614,6 +3650,13 @@ window.addEventListener("keydown", function(e) {
   const tag = e.target && e.target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || e.isComposing) return;
   const key = String(e.key || "").toLowerCase();
+
+  if (key === "/") {
+    e.preventDefault();
+    restartAllClips();
+    return;
+  }
+
   if (!/^[a-z0-9]$/.test(key)) return;
 
   if (key === "0") {
