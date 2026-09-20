@@ -1448,6 +1448,7 @@ async function startRecording() {
     "video/webm;codecs=vp8,opus",
     "video/webm"
   ];
+
   const directMp4Type = directMp4Types.find(function(type) {
     return MediaRecorder.isTypeSupported(type);
   });
@@ -1483,6 +1484,56 @@ async function startRecording() {
     const sourceType = recordingState.recorder && recordingState.recorder.mimeType || mimeType || "video/webm";
     await finishRecording(chunks, sourceType);
   };
+
+  recordingState.recorder.onerror = function(event) {
+    console.error("Meeting recorder error", event.error || event);
+    state.recording = false;
+    state.recordingBusy = false;
+    cancelAnimationFrame(recordingState.animationFrame);
+    cleanupRecording();
+    updateRecordingControls();
+    alert("The meeting recording stopped because the browser reported an error.");
+  };
+
+  state.recording = true;
+  state.recordingBusy = false;
+  updateRecordingControls();
+  drawRecordingFrame();
+
+  try {
+    recordingState.recorder.start(750);
+  } catch (error) {
+    state.recording = false;
+    cleanupRecording();
+    updateRecordingControls();
+    alert("Could not start the meeting recording.");
+    return;
+  }
+
+  getRecordingFFmpeg().catch(function(error) {
+    console.warn("FFmpeg warm-up failed; conversion will retry at stop.", error);
+  });
+
+  syncAudioIndicator();
+}
+
+async function stopRecording() {
+  if (!state.recording || !recordingState.recorder) return;
+
+  state.recording = false;
+  state.recordingBusy = true;
+  state.recordingProgress = 0;
+  updateRecordingControls();
+  cancelAnimationFrame(recordingState.animationFrame);
+
+  try {
+    recordingState.recorder.stop();
+  } catch (error) {
+    state.recordingBusy = false;
+    cleanupRecording();
+    updateRecordingControls();
+  }
+}
 
 async function finishRecording(chunks, sourceType) {
   const normalizedType = String(sourceType || "video/webm").toLowerCase();
