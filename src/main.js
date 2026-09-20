@@ -948,6 +948,64 @@ function undoLastLeave() {
   return true;
 }
 
+function joinBackParticipant(personId) {
+  let snapshotIndex = -1;
+
+  for (let i = state.leaveHistory.length - 1; i >= 0; i -= 1) {
+    if (state.leaveHistory[i] && state.leaveHistory[i].type === (personId === "me" ? "me" : "fake")) {
+      if (personId === "me" || state.leaveHistory[i].person?.id === personId) {
+        snapshotIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (snapshotIndex < 0) return false;
+
+  const snapshot = state.leaveHistory.splice(snapshotIndex, 1)[0];
+  if (snapshot.type === "me") {
+    state.displayName = snapshot.displayName;
+    state.myVideos = snapshot.myVideos || [];
+    state.myVideoIndex = snapshot.myVideoIndex || 0;
+    state.myAutoPlayNext = snapshot.myAutoPlayNext;
+    state.myAutoCameraOff = snapshot.myAutoCameraOff;
+    state.myAudioOn = snapshot.myAudioOn;
+    state.myParticipantHidden = false;
+    state.cameraHidden.me = snapshot.cameraHiddenMe;
+    state.cameraOn = snapshot.cameraOn;
+    state.needsNextOnCamera = snapshot.needsNextOnCamera;
+    state.myAvatarUrl = snapshot.myAvatarUrl;
+
+    const keys = snapshot.keybinds || {};
+    setPersonKeybind("me", keys.camera);
+    setNextKeybind("me", keys.next);
+    setAudioKeybind("me", keys.audio);
+    setLeaveKeybind("me", keys.leave);
+  } else {
+    const person = snapshot.person;
+    if (!person) return false;
+
+    if (!state.fakePeople.some(function(p) { return p.id === person.id; })) {
+      state.fakePeople.push(person);
+    }
+
+    setPersonKeybind(person.id, snapshot.keybinds?.camera);
+    setNextKeybind(person.id, snapshot.keybinds?.next);
+    setAudioKeybind(person.id, snapshot.keybinds?.audio);
+    setLeaveKeybind(person.id, snapshot.keybinds?.leave);
+
+    if (snapshot.hostIdBeforeLeave === person.id) {
+      state.hostId = person.id;
+    }
+    normalizeHosts();
+  }
+
+  render();
+  if (state.recording) syncRecordingAudio();
+  queueMeetingSave();
+  return true;
+}
+
 function setAudioKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.audioKeybinds[personId];
@@ -1289,7 +1347,7 @@ function renderParticipants() {
   const myVideos = state.myVideos || [];
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
-    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
+    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back" data-person-id="me">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
     (state.leaveHistory.length ? '<button class="join-back-button" data-action="join-back"><span>↩</span><strong>Join Back</strong><small>Restore the last person who left with the same setup</small></button>' : '') +
     '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div>' +
@@ -2693,7 +2751,11 @@ function bind() {
       if (a === "add-person") { openAddPerson(); return; }
       if (a === "edit-person") { openParticipantEditor(el.dataset.personId); return; }
       if (a === "make-host") { makeHost(el.dataset.personId); return; }
-      if (a === "join-back") { undoLastLeave(); return; }
+      if (a === "join-back") { 
+        if (el.dataset.personId === "me") joinBackParticipant("me");
+        else undoLastLeave();
+        return;
+      }
       if (a === "restart-clip") { restartPersonClip(el.dataset.personId); return; }
       if (a === "toggle-clip") { togglePersonClip(el.dataset.personId); return; }
       if (a === "leave-person") { leavePerson(el.dataset.personId); return; }
