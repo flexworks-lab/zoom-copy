@@ -59,6 +59,135 @@ const state = {
   participantOptionsOpen: false
 };
 
+const TUTORIAL_STORAGE_KEY = "zoom-copy-tutorial-complete";
+
+function hasCompletedTutorial() {
+  try {
+    return localStorage.getItem(TUTORIAL_STORAGE_KEY) === "1";
+  } catch (error) {
+    return false;
+  }
+}
+
+function markTutorialComplete() {
+  try {
+    localStorage.setItem(TUTORIAL_STORAGE_KEY, "1");
+  } catch (error) {}
+}
+
+function openTutorial(markCompleteOnClose) {
+  const existing = document.querySelector(".tutorial-backdrop");
+  if (existing) existing.remove();
+
+  const steps = [
+    {
+      eyebrow: "Welcome to Zoom Copy",
+      title: "A meeting sandbox",
+      body: "Use this site to build a realistic meeting, test participant controls, load local video clips, and try the call interface without needing a real webcam or meeting service.",
+      icon: "video"
+    },
+    {
+      eyebrow: "Meetings",
+      title: "Start with your meeting",
+      body: "The Home screen is your launch point. Start or join the demo meeting, then use Participants to manage people, cameras, audio, video playlists, and keybinds.",
+      icon: "users"
+    },
+    {
+      eyebrow: "Video tools",
+      title: "Turn videos into camera feeds",
+      body: "Add one or more video files to yourself or a fake participant. Next follows the playlist order, which you can change with ↑ and ↓. Each clip can also be paused, restarted, or deleted.",
+      icon: "play"
+    },
+    {
+      eyebrow: "You are ready",
+      title: "Explore the controls",
+      body: "Use Settings for preferences, the meeting controls for camera, audio, sharing, and recording, and the Participants Options menu for global video controls.",
+      icon: "settings"
+    }
+  ];
+
+  let stepIndex = 0;
+  const modal = document.createElement("div");
+  modal.className = "tutorial-backdrop";
+  modal.innerHTML =
+    '<div class="tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorial-title">' +
+      '<button type="button" class="tutorial-close" aria-label="Close tutorial">×</button>' +
+      '<div class="tutorial-progress"><div class="tutorial-progress-bar"></div></div>' +
+      '<div class="tutorial-icon" id="tutorial-icon"></div>' +
+      '<span class="eyebrow" id="tutorial-eyebrow"></span>' +
+      '<h2 id="tutorial-title"></h2>' +
+      '<p class="tutorial-body" id="tutorial-body"></p>' +
+      '<div class="tutorial-dots" id="tutorial-dots"></div>' +
+      '<div class="tutorial-actions"><button type="button" class="secondary tutorial-skip">Skip</button><span></span><button type="button" class="primary tutorial-next">Next</button></div>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+
+  const iconSlot = modal.querySelector("#tutorial-icon");
+  const eyebrow = modal.querySelector("#tutorial-eyebrow");
+  const title = modal.querySelector("#tutorial-title");
+  const body = modal.querySelector("#tutorial-body");
+  const dots = modal.querySelector("#tutorial-dots");
+  const progressBar = modal.querySelector(".tutorial-progress-bar");
+  const nextButton = modal.querySelector(".tutorial-next");
+
+  function closeTutorial(completed) {
+    if (completed || markCompleteOnClose) markTutorialComplete();
+    modal.remove();
+  }
+
+  function renderTutorialStep() {
+    const step = steps[stepIndex];
+    iconSlot.innerHTML = icon(step.icon);
+    eyebrow.textContent = step.eyebrow;
+    title.textContent = step.title;
+    body.textContent = step.body;
+    progressBar.style.width = (((stepIndex + 1) / steps.length) * 100) + "%";
+    dots.innerHTML = steps.map(function(_, index) {
+      return '<button type="button" class="tutorial-dot ' + (index === stepIndex ? "active" : "") + '" data-tutorial-step="' + index + '" aria-label="Go to tutorial step ' + (index + 1) + '"></button>';
+    }).join("");
+    nextButton.textContent = stepIndex === steps.length - 1 ? "Get started" : "Next";
+
+    modal.querySelectorAll("[data-tutorial-step]").forEach(function(dot) {
+      dot.addEventListener("click", function() {
+        stepIndex = Number(dot.dataset.tutorialStep) || 0;
+        renderTutorialStep();
+      });
+    });
+  }
+
+  modal.querySelector(".tutorial-close").addEventListener("click", function() {
+    closeTutorial(false);
+  });
+  modal.querySelector(".tutorial-skip").addEventListener("click", function() {
+    closeTutorial(true);
+  });
+  nextButton.addEventListener("click", function() {
+    if (stepIndex === steps.length - 1) {
+      closeTutorial(true);
+      return;
+    }
+    stepIndex += 1;
+    renderTutorialStep();
+  });
+  modal.addEventListener("click", function(event) {
+    if (event.target === modal) closeTutorial(true);
+  });
+  document.addEventListener("keydown", function handleTutorialEscape(event) {
+    if (!document.body.contains(modal)) {
+      document.removeEventListener("keydown", handleTutorialEscape);
+      return;
+    }
+    if (event.key === "Escape") closeTutorial(true);
+  });
+
+  renderTutorialStep();
+}
+
+function showFirstTimeTutorial() {
+  if (!hasCompletedTutorial()) openTutorial(true);
+}
+
 const recordingAvatarImages = new Map();
 
 const MEETING_DB_NAME = "zoom-copy-meeting-storage";
@@ -1165,7 +1294,7 @@ function shell(content, active) {
         '<button class="nav-item" data-action="contacts">' + icon("users") + '<span>Contacts</span></button>' +
         '<button class="nav-item ' + (active === "settings" ? "active" : "") + '" data-page="settings">' + icon("settings") + '<span>Settings</span></button>' +
       '</nav>' +
-      '<div class="sidebar-bottom"><div class="profile-chip"><div class="avatar small">MC</div><div><strong>My account</strong><span>Available</span></div><span class="chevron">⌄</span></div></div>' +
+      '<div class="sidebar-bottom"><button class="profile-chip" data-page="settings"><div class="avatar small">MC</div><div><strong>My account</strong><span>Available</span></div><span class="chevron">⌄</span></div></div>' +
     '</aside><main class="page">' + content + '</main></div>';
 }
 
@@ -1173,13 +1302,13 @@ function renderHome() {
   const content =
     '<header class="topbar"><div><span class="eyebrow">Meet smarter</span><h1>Good evening</h1></div><button class="icon-button" title="Settings" data-page="settings">' + icon("settings") + '</button></header>' +
     '<section class="hero-grid">' +
-      '<article class="hero-card"><div class="hero-copy"><span class="pill">Your meeting space</span><h2>Meet, present, and test fake cameras in one place.</h2><p>Build a meeting with realistic participant tiles, local video files, and familiar call controls.</p><div class="hero-actions"><button class="primary" data-page="meeting">Start a meeting</button><button class="secondary" data-page="meeting">Join a meeting</button></div></div>' +
+      '<article class="hero-card"><div class="hero-copy"><span class="pill">Your meeting space</span><h2>Meet, present, and test fake cameras in one place.</h2><p>Build a meeting with realistic participant tiles, local video files, and familiar call controls.</p><div class="hero-actions"><button class="primary" data-action="start-meeting">Start a meeting</button><button class="secondary" data-action="join-meeting">Join a meeting</button></div></div>' +
         '<div class="hero-visual"><div class="mini-window"><div class="mini-top"><span></span><span></span><span></span><b>Team standup</b><small>12:41</small></div><div class="mini-grid"><div class="mini-tile tile-a"><span>AM</span></div><div class="mini-tile tile-b"><span>JL</span></div><div class="mini-tile tile-c"><span>SR</span></div><div class="mini-tile tile-d"><span>MC</span></div></div></div></div>' +
       '</article>' +
-      '<div class="quick-column"><button class="quick-card" data-page="meeting"><div class="quick-icon blue">' + icon("video") + '</div><div><strong>New meeting</strong><span>Start instantly</span></div><b>›</b></button><button class="quick-card" data-page="meeting"><div class="quick-icon green">' + icon("users") + '</div><div><strong>Fake participants</strong><span>Add people to your call</span></div><b>›</b></button><div class="tip-card"><span class="tip-label">SIMULATED CAMERA</span><strong>Upload a video file and use it as a meeting camera tile.</strong><p>Your file stays local to this browser session.</p></div></div>' +
+      '<div class="quick-column"><button class="quick-card" data-action="start-meeting"><div class="quick-icon blue">' + icon("video") + '</div><div><strong>New meeting</strong><span>Start instantly</span></div><b>›</b></button><button class="quick-card" data-action="open-participants"><div class="quick-icon green">' + icon("users") + '</div><div><strong>Fake participants</strong><span>Add people to your call</span></div><b>›</b></button><div class="tip-card"><span class="tip-label">SIMULATED CAMERA</span><strong>Upload a video file and use it as a meeting camera tile.</strong><p>Your file stays local to this browser session.</p></div></div>' +
     '</section>' +
-    '<section class="section"><div class="section-heading"><div><span class="eyebrow">Recent</span><h3>Meetings</h3></div><button class="text-button" data-page="meeting">View all</button></div><div class="meeting-list">' +
-      '<div class="meeting-row"><div class="meeting-icon">' + icon("video") + '</div><div><strong>Product sync</strong><span>Today · 14 participants</span></div><span class="meeting-id">846 221 904</span><button class="join-small" data-page="meeting">Join</button></div>' +
+    '<section class="section"><div class="section-heading"><div><span class="eyebrow">Recent</span><h3>Meetings</h3></div><button class="text-button" data-action="open-participants">View all</button></div><div class="meeting-list">' +
+      '<div class="meeting-row"><div class="meeting-icon">' + icon("video") + '</div><div><strong>Product sync</strong><span>Today · 14 participants</span></div><span class="meeting-id">846 221 904</span><button class="join-small" data-action="join-meeting">Join</button></div>' +
       '<div class="meeting-row"><div class="meeting-icon">' + icon("chat") + '</div><div><strong>Design review</strong><span>Yesterday · 6 participants</span></div><span class="meeting-id">532 118 227</span><button class="join-small" data-page="meeting">Join</button></div>' +
     '</div></section>';
   return shell(content, "home");
@@ -1187,7 +1316,7 @@ function renderHome() {
 
 function renderSettings() {
   const content =
-    '<header class="topbar"><div><span class="eyebrow">Preferences</span><h1>Settings</h1></div></header>' +
+    '<header class="topbar"><div><span class="eyebrow">Preferences</span><h1>Settings</h1></div><button class="secondary settings-help-button" data-action="open-tutorial">Open tutorial</button></header>' +
     '<section class="settings-layout"><div class="settings-nav"><button class="settings-nav-item active">General</button><button class="settings-nav-item">Video</button><button class="settings-nav-item">Audio</button><button class="settings-nav-item">Meeting</button></div>' +
     '<div class="settings-panel"><h2>General</h2><p class="muted">Tune the demo meeting experience.</p>' +
     '<label class="setting-row"><span><strong>Open meetings in the demo room</strong><small>Skip the home screen when starting a meeting.</small></span><input type="checkbox" checked></label>' +
@@ -2987,6 +3116,25 @@ function bind() {
   document.querySelectorAll("[data-action]").forEach(function(el){
     el.addEventListener("click", function(){
       const a = el.dataset.action;
+      if (a === "start-meeting" || a === "join-meeting") {
+        state.page = "meeting";
+        state.meetingStarted = true;
+        state.chatOpen = false;
+        render();
+        return;
+      }
+      if (a === "open-participants") {
+        state.page = "meeting";
+        state.meetingStarted = true;
+        state.participantsOpen = true;
+        state.chatOpen = false;
+        render();
+        return;
+      }
+      if (a === "open-tutorial") {
+        openTutorial(false);
+        return;
+      }
       if (a === "toggle-mic") state.micOn = !state.micOn;
       if (a === "toggle-camera") {
         state.cameraOn = !state.cameraOn;
@@ -3038,7 +3186,25 @@ function bind() {
         setAudioForPerson(personId, !isPersonAudioOn(getParticipant(personId)));
         return;
       }
-      if (a === "contacts") { alert("Contacts is a demo placeholder."); return; }
+      if (a === "contacts") {
+        const existingContacts = document.querySelector(".contacts-modal-backdrop");
+        if (existingContacts) existingContacts.remove();
+        const contactsModal = document.createElement("div");
+        contactsModal.className = "tutorial-backdrop contacts-modal-backdrop";
+        contactsModal.innerHTML = '<div class="tutorial-card contacts-card" role="dialog" aria-modal="true"><button type="button" class="tutorial-close contacts-close" aria-label="Close contacts">×</button><div class="tutorial-icon">' + icon("users") + '</div><span class="eyebrow">Contacts</span><h2>Your contacts</h2><p class="tutorial-body">This demo does not connect to a real contacts service yet. Start a meeting or add fake participants to build your test room.</p><div class="tutorial-actions"><span></span><button type="button" class="secondary contacts-close-button">Close</button><button type="button" class="primary contacts-meeting">Go to meeting</button></div></div>';
+        document.body.appendChild(contactsModal);
+        contactsModal.querySelectorAll(".contacts-close, .contacts-close-button").forEach(function(button) {
+          button.addEventListener("click", function() { contactsModal.remove(); });
+        });
+        contactsModal.querySelector(".contacts-meeting").addEventListener("click", function() {
+          contactsModal.remove();
+          state.page = "meeting";
+          state.meetingStarted = true;
+          state.participantsOpen = true;
+          render();
+        });
+        return;
+      }
       render();
     });
   });
@@ -3169,6 +3335,7 @@ async function bootMeetingApp() {
   normalizeHosts();
   render();
   if (restored) restorePersistedPlayback();
+  showFirstTimeTutorial();
 }
 
 window.addEventListener("visibilitychange", function() {
