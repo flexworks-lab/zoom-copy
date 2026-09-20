@@ -96,7 +96,7 @@ button{border:0;cursor:pointer}
 .modal{max-height:calc(100vh - 40px);overflow-y:auto;overscroll-behavior:contain}
 .modal-backdrop{overflow:auto}
 
-.audio-key-badge{position:absolute;left:8px;top:64px;padding:4px 7px;border-radius:6px;background:rgba(42,141,91,.78);color:#fff;font-size:8px;font-weight:800;letter-spacing:.04em;backdrop-filter:blur(5px)}.leave-key-badge{position:absolute;left:8px;top:92px;padding:4px 7px;border-radius:6px;background:rgba(183,72,92,.8);color:#fff;font-size:8px;font-weight:800;letter-spacing:.04em;backdrop-filter:blur(5px);z-index:4}
+.audio-key-badge{position:absolute;left:8px;top:64px;padding:4px 7px;border-radius:6px;background:rgba(42,141,91,.78);color:#fff;font-size:8px;font-weight:800;letter-spacing:.04em;backdrop-filter:blur(5px)}.leave-key-badge{position:absolute;left:8px;top:92px;padding:4px 7px;border-radius:6px;background:rgba(183,72,92,.8);color:#fff;font-size:8px;font-weight:800;letter-spacing:.04em;backdrop-filter:blur(5px);z-index:4}.pause-key-badge{position:absolute;left:8px;top:120px;padding:4px 7px;border-radius:6px;background:rgba(126,91,188,.8);color:#fff;font-size:8px;font-weight:800;letter-spacing:.04em;backdrop-filter:blur(5px);z-index:4}
 .autoplay-row{margin-top:16px}
 
 .muted-audio-badge{position:absolute;top:9px;right:42px;display:inline-flex;align-items:center;gap:5px;padding:5px 8px;border-radius:6px;background:rgba(22,27,34,.78);color:#fff;font-size:8px;font-weight:900;letter-spacing:.05em;backdrop-filter:blur(5px);z-index:2}
