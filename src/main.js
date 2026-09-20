@@ -17,6 +17,7 @@ window.addEventListener("unhandledrejection", function (event) {
 
 const state = {
   page: "home",
+  meetingStarted: false,
   meetingId: "846 221 904",
   micOn: true,
   cameraOn: true,
@@ -239,7 +240,7 @@ function putMeetingRecord(record) {
 }
 
 async function saveMeetingState() {
-  if (restoringMeeting) return;
+  if (restoringMeeting || !state.meetingStarted) return;
   if (meetingSaveInProgress) {
     meetingSaveQueued = true;
     return;
@@ -369,6 +370,7 @@ function restoreMeetingRecord(record) {
   normalizeHosts();
 
   state.page = "meeting";
+  state.meetingStarted = true;
   state._savedPlayback = saved.playback || {};
   return true;
 }
@@ -1018,6 +1020,7 @@ function restoreVideoState(snapshot) {
 }
 
 function render() {
+  if (state.page === "meeting") state.meetingStarted = true;
   const videoState = state.page === "meeting" ? captureVideoState() : {};
   if (state.page === "meeting") app.innerHTML = renderMeeting();
   else if (state.page === "settings") app.innerHTML = renderSettings();
