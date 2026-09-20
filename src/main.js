@@ -21,6 +21,7 @@ const state = {
   shareOn: false,
   participantsOpen: true,
   chatOpen: false,
+  displayName: "Me",
   fakePeople: [
     { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200 },
     { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280 },
@@ -45,6 +46,28 @@ const icons = {
 
 function icon(name) {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + icons[name] + "</svg>";
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function initialsFor(name) {
+  return String(name)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(function(x) { return x[0].toUpperCase(); })
+    .join("") || "GU";
+}
+
+function revokeBlob(url) {
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
 function render() {
@@ -124,10 +147,13 @@ function renderMeeting() {
 }
 
 function renderParticipants() {
+  const safeDisplayName = escapeHtml(state.displayName);
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
+    '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>Host · You' + (state.selectedVideo ? ' · Fake camera' : '') + '</span></div><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + optional video</small></button><div class="participant-list">' +
-    '<div class="participant-list-row"><div class="avatar">MC</div><div><strong>Me</strong><span>Host · You</span></div><div class="row-icons">' + icon(state.micOn ? "mic" : "micOff") + icon(state.cameraOn ? "video" : "videoOff") + '</div></div>' +
-    state.fakePeople.map(function(p){ return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + p.initials + '</div><div><strong>' + p.name + '</strong><span>' + (p.role || "Participant") + (p.videoUrl ? " · Video file" : "") + '</span></div><div class="row-icons">' + icon("mic") + icon(p.videoUrl ? "video" : "videoOff") + '</div></div>'; }).join("") +
+    state.fakePeople.map(function(p){
+      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + (p.role || "Participant") + (p.videoUrl ? " · Video file" : " · No camera") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon("mic") + icon(p.videoUrl ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+    }).join("") +
     '</div></aside>';
 }
 
@@ -137,29 +163,101 @@ function renderChat() {
 }
 
 function openAddPerson() {
+  openParticipantEditor(null);
+}
+
+function openParticipantEditor(personId) {
+  const isMe = personId === "me";
+  const person = isMe
+    ? { id: "me", name: state.displayName, initials: initialsFor(state.displayName), hue: 145, videoUrl: state.selectedVideo }
+    : state.fakePeople.find(function(p) { return p.id === personId; });
+
+  if (!person) return;
+
   const modal = document.createElement("div");
   modal.className = "modal-backdrop";
   modal.innerHTML =
-    '<form class="modal"><button type="button" class="modal-close" data-close>×</button><span class="eyebrow">Participants</span><h2>Add a fake person</h2><p class="muted">Create a local participant and optionally assign a video file to act as their camera feed.</p>' +
-    '<label class="field-label">Name<input name="name" required maxlength="28" placeholder="Taylor Kim" autofocus></label>' +
-    '<label class="field-label">Video file<input name="video" type="file" accept="video/*"></label><div class="file-help">MP4, WebM, MOV and other browser-supported video formats work best.</div>' +
-    '<div class="modal-actions"><button type="button" class="secondary" data-close>Cancel</button><button class="primary" type="submit">Add person</button></div></form>';
+    '<form class="modal">' +
+      '<button type="button" class="modal-close" data-close>×</button>' +
+      '<span class="eyebrow">' + (isMe ? "Your participant" : "Fake participant") + '</span>' +
+      '<h2>' + (isMe ? "Edit your meeting identity" : "Edit fake person") + '</h2>' +
+      '<p class="muted">' + (isMe ? "Change your name and your simulated camera video." : "Change the name and fake camera video for this participant.") + '</p>' +
+      '<label class="field-label">Display name<input name="name" required maxlength="28" value="' + escapeHtml(person.name) + '" placeholder="Taylor Kim" autofocus></label>' +
+      '<label class="field-label">Fake camera video<input name="video" type="file" accept="video/*"></label>' +
+      '<div class="file-help">' + (person.videoUrl ? "A video is already assigned. Pick another file to replace it." : "No video is assigned. Pick a file to give this participant a fake camera.") + '</div>' +
+      '<label class="check-row"><input name="clearVideo" type="checkbox"><span>Remove current fake camera</span></label>' +
+      '<div class="modal-actions">' +
+        (isMe ? '' : '<button type="button" class="danger-secondary" data-remove>Remove person</button>') +
+        '<span class="modal-spacer"></span><button type="button" class="secondary" data-close>Cancel</button><button class="primary" type="submit">Save changes</button>' +
+      '</div>' +
+    '</form>';
+
   document.body.appendChild(modal);
 
-  modal.querySelectorAll("[data-close]").forEach(function(b){ b.addEventListener("click", function(){ modal.remove(); }); });
-  modal.addEventListener("click", function(e){ if (e.target === modal) modal.remove(); });
-  modal.querySelector("form").addEventListener("submit", function(e){
+  modal.querySelectorAll("[data-close]").forEach(function(b) {
+    b.addEventListener("click", function() { modal.remove(); });
+  });
+
+  modal.addEventListener("click", function(e) {
+    if (e.target === modal) modal.remove();
+  });
+
+  const removeButton = modal.querySelector("[data-remove]");
+  if (removeButton) {
+    removeButton.addEventListener("click", function() {
+      const index = state.fakePeople.findIndex(function(p) { return p.id === personId; });
+      if (index >= 0) {
+        revokeBlob(state.fakePeople[index].videoUrl);
+        state.fakePeople.splice(index, 1);
+      }
+      modal.remove();
+      render();
+    });
+  }
+
+  modal.querySelector("form").addEventListener("submit", function(e) {
     e.preventDefault();
+
     const fd = new FormData(e.currentTarget);
-    const name = String(fd.get("name") || "Guest").trim();
+    const name = String(fd.get("name") || "").trim() || "Guest";
     const file = fd.get("video");
-    const initials = name.split(/\s+/).filter(Boolean).slice(0,2).map(function(x){ return x[0].toUpperCase(); }).join("") || "GU";
-    const person = { id: crypto.randomUUID(), name: name, role: "", initials: initials, hue: Math.floor(Math.random()*360) };
-    if (file instanceof File && file.size) person.videoUrl = URL.createObjectURL(file);
-    state.fakePeople.push(person);
+    const clearVideo = e.currentTarget.querySelector('[name="clearVideo"]').checked;
+
+    if (isMe) {
+      state.displayName = name;
+
+      if (clearVideo) {
+        revokeBlob(state.selectedVideo);
+        state.selectedVideo = null;
+        state.cameraOn = false;
+      } else if (file instanceof File && file.size) {
+        revokeBlob(state.selectedVideo);
+        state.selectedVideo = URL.createObjectURL(file);
+        state.cameraOn = true;
+      }
+    } else {
+      const target = state.fakePeople.find(function(p) { return p.id === personId; });
+      if (!target) return;
+
+      target.name = name;
+      target.initials = initialsFor(name);
+
+      if (clearVideo) {
+        revokeBlob(target.videoUrl);
+        target.videoUrl = null;
+      } else if (file instanceof File && file.size) {
+        revokeBlob(target.videoUrl);
+        target.videoUrl = URL.createObjectURL(file);
+      }
+    }
+
     modal.remove();
     render();
   });
+
+  const nameInput = modal.querySelector('[name="name"]');
+  nameInput.focus();
+  nameInput.select();
 }
 
 function openFakeCameraPicker() {
@@ -169,7 +267,7 @@ function openFakeCameraPicker() {
   input.onchange = function() {
     const file = input.files && input.files[0];
     if (!file) return;
-    if (state.selectedVideo) URL.revokeObjectURL(state.selectedVideo);
+    revokeBlob(state.selectedVideo);
     state.selectedVideo = URL.createObjectURL(file);
     state.cameraOn = true;
     render();
@@ -190,6 +288,7 @@ function bind() {
       if (a === "toggle-chat") state.chatOpen = !state.chatOpen;
       if (a === "toggle-share") state.shareOn = !state.shareOn;
       if (a === "add-person") { openAddPerson(); return; }
+      if (a === "edit-person") { openParticipantEditor(el.dataset.personId); return; }
       if (a === "add-video") { openFakeCameraPicker(); return; }
       if (a === "contacts") { alert("Contacts is a demo placeholder."); return; }
       render();
