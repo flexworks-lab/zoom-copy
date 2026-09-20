@@ -22,16 +22,20 @@ const state = {
   participantsOpen: true,
   chatOpen: false,
   displayName: "Me",
+  hostId: "alex",
   fakePeople: [
-    { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200, videos: [], currentVideoIndex: 0, cameraVisible: true },
-    { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280, videos: [], currentVideoIndex: 0, cameraVisible: true },
-    { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35, videos: [], currentVideoIndex: 0, cameraVisible: true }
+    { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true, needsNextOnCamera: false },
+    { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true, needsNextOnCamera: false },
+    { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true, needsNextOnCamera: false }
   ],
   myVideos: [],
   myVideoIndex: 0,
+  myAutoPlayNext: false,
   cameraHidden: {},
   keybinds: {},
   nextKeybinds: {},
+  audioKeybinds: {},
+  myAudioOn: true,
   audioEnabled: false
 };
 
@@ -97,6 +101,47 @@ function isCameraVisible(person) {
   return person.cameraVisible !== false;
 }
 
+function normalizeHosts() {
+  if (!state.fakePeople.length) {
+    state.hostId = null;
+    return;
+  }
+
+  const currentHost = state.fakePeople.find(function(p) { return p.id === state.hostId; });
+  if (!currentHost) state.hostId = state.fakePeople[0].id;
+
+  state.fakePeople.forEach(function(p) {
+    p.role = p.id === state.hostId ? "Host" : "";
+  });
+}
+
+function getVideos(person) {
+  if (!person) return [];
+  if (person.id === "me") return state.myVideos || [];
+  if (Array.isArray(person.videos)) return person.videos;
+  if (person.videoUrl) return [{ url: person.videoUrl, name: "Video" }];
+  return [];
+}
+
+function getCurrentVideoUrl(person) {
+  const videos = getVideos(person);
+  if (!videos.length) return null;
+  const rawIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
+  const index = Math.max(0, Math.min(rawIndex, videos.length - 1));
+  return videos[index]?.url || null;
+}
+
+function isCameraVisible(person) {
+  if (!person) return false;
+  if (person.id === "me") return !state.cameraHidden.me && state.cameraOn;
+  return person.cameraVisible !== false;
+}
+
+function isPersonAudioOn(person) {
+  if (!person) return false;
+  return person.id === "me" ? state.myAudioOn : person.audioOn !== false;
+}
+
 function getParticipant(personId) {
   if (personId === "me") {
     return {
@@ -106,39 +151,88 @@ function getParticipant(personId) {
       hue: 145,
       videos: state.myVideos || [],
       currentVideoIndex: state.myVideoIndex,
-      cameraVisible: !state.cameraHidden.me
+      cameraVisible: !state.cameraHidden.me,
+      autoPlayNext: state.myAutoPlayNext,
+      audioOn: state.myAudioOn,
+      needsNextOnCamera: state.needsNextOnCamera
     };
   }
   return state.fakePeople.find(function(p) { return p.id === personId; }) || null;
 }
 
+function advancePersonVideo(personId) {
+  const person = getParticipant(personId);
+  if (!person) return false;
+  const videos = getVideos(person);
+  if (videos.length < 2) return false;
+
+  if (personId === "me") {
+    state.myVideoIndex = (state.myVideoIndex + 1) % videos.length;
+    state.cameraHidden.me = false;
+    state.cameraOn = true;
+    state.needsNextOnCamera = false;
+  } else {
+    const target = state.fakePeople.find(function(p) { return p.id === personId; });
+    if (!target) return false;
+    target.currentVideoIndex = ((target.currentVideoIndex || 0) + 1) % target.videos.length;
+    target.cameraVisible = true;
+    target.needsNextOnCamera = false;
+  }
+
+  updateParticipantTile(personId);
+  updateParticipantsListOnly();
+  return true;
+}
+
 function togglePersonCamera(personId) {
   if (personId === "me") {
-    state.cameraHidden.me = !state.cameraHidden.me;
-    state.cameraOn = !state.cameraHidden.me;
+    const turningOn = state.cameraHidden.me || !state.cameraOn;
+    if (turningOn && state.needsNextOnCamera && state.myVideos.length > 1) {
+      state.myVideoIndex = (state.myVideoIndex + 1) % state.myVideos.length;
+      state.needsNextOnCamera = false;
+    }
+    state.cameraHidden.me = !turningOn;
+    state.cameraOn = turningOn;
   } else {
     const person = getParticipant(personId);
     if (!person) return;
-    person.cameraVisible = person.cameraVisible === false;
+    const target = state.fakePeople.find(function(p) { return p.id === personId; });
+    const turningOn = target.cameraVisible === false;
+    if (turningOn && target.needsNextOnCamera && target.videos.length > 1) {
+      target.currentVideoIndex = ((target.currentVideoIndex || 0) + 1) % target.videos.length;
+      target.needsNextOnCamera = false;
+    }
+    target.cameraVisible = turningOn;
   }
+
   updateParticipantTile(personId);
   updateParticipantsListOnly();
 }
 
-function advancePersonVideo(personId) {
-  if (personId === "me") {
-    if (!state.myVideos || state.myVideos.length < 2) return;
-    state.myVideoIndex = (state.myVideoIndex + 1) % state.myVideos.length;
-    state.cameraHidden.me = false;
-    state.cameraOn = true;
-    updateParticipantTile("me");
-    updateParticipantsListOnly();
+function handleVideoEnded(personId) {
+  const person = getParticipant(personId);
+  if (!person) return;
+  const videos = getVideos(person);
+  if (!videos.length) return;
+
+  const autoPlayNext = person.id === "me" ? state.myAutoPlayNext : person.autoPlayNext === true;
+
+  if (autoPlayNext && videos.length > 1) {
+    advancePersonVideo(personId);
     return;
   }
-  const person = getParticipant(personId);
-  if (!person || !Array.isArray(person.videos) || person.videos.length < 2) return;
-  person.currentVideoIndex = ((person.currentVideoIndex || 0) + 1) % person.videos.length;
-  person.cameraVisible = true;
+
+  if (personId === "me") {
+    state.cameraHidden.me = true;
+    state.cameraOn = false;
+    state.needsNextOnCamera = videos.length > 1;
+  } else {
+    const target = state.fakePeople.find(function(p) { return p.id === personId; });
+    if (!target) return;
+    target.cameraVisible = false;
+    target.needsNextOnCamera = target.videos.length > 1;
+  }
+
   updateParticipantTile(personId);
   updateParticipantsListOnly();
 }
@@ -161,6 +255,35 @@ function setNextKeybind(personId, key) {
     if (id !== personId && state.nextKeybinds[id] === normalized) delete state.nextKeybinds[id];
   });
   state.nextKeybinds[personId] = normalized;
+}
+
+function setAudioKeybind(personId, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  delete state.audioKeybinds[personId];
+  if (!/^[a-z0-9]$/i.test(normalized)) return;
+  Object.keys(state.audioKeybinds).forEach(function(id) {
+    if (id !== personId && state.audioKeybinds[id] === normalized) delete state.audioKeybinds[id];
+  });
+  state.audioKeybinds[personId] = normalized;
+}
+
+function setAudioForPerson(personId, enabled) {
+  state.audioEnabled = true;
+  if (personId === "me") {
+    state.myAudioOn = enabled;
+  } else {
+    const person = getParticipant(personId);
+    if (person) person.audioOn = enabled;
+  }
+
+  const video = document.querySelector('.participant-video[data-person-id="' + personId + '"]');
+  if (video) {
+    video.muted = !state.audioEnabled || !isPersonAudioOn(getParticipant(personId));
+    video.volume = 1;
+    if (!video.muted) video.play().catch(function(){});
+  }
+  updateParticipantTile(personId);
+  updateParticipantsListOnly();
 }
 
 function revokeVideos(videos) {
@@ -275,66 +398,19 @@ function participantTile(person) {
   const showVideo = Boolean(videoUrl && isCameraVisible(person));
   const keybind = state.keybinds[person.id];
   const nextKey = state.nextKeybinds[person.id];
+  const audioKey = state.audioKeybinds[person.id];
   const media = showVideo
     ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '" autoplay playsinline' +
-      (videoCount === 1 ? " loop" : "") +
-      (state.audioEnabled ? "" : " muted") + '></video>'
+      (state.audioEnabled && isPersonAudioOn(person) ? "" : " muted") + '></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '"><span>' + escapeHtml(person.initials) + '</span></div>';
   const keyBadge = keybind ? '<span class="keybind-badge">Cam ' + escapeHtml(keybind.toUpperCase()) + '</span>' : "";
   const nextBadge = nextKey ? '<span class="next-key-badge">Next ' + escapeHtml(nextKey.toUpperCase()) + '</span>' : "";
-  const hiddenBadge = !isCameraVisible(person) && getVideos(person).length ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
+  const audioBadge = audioKey ? '<span class="audio-key-badge">Audio ' + escapeHtml(audioKey.toUpperCase()) + '</span>' : "";
+  const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
   return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
-    (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' + keyBadge + nextBadge +
+    (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' + keyBadge + nextBadge + audioBadge +
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
-}
-
-
-
-function updateParticipantTile(personId) {
-  const person = getParticipant(personId);
-  if (!person) return;
-
-  const tile = Array.from(document.querySelectorAll(".participant-tile")).find(function(el) {
-    return el.dataset.personId === personId;
-  });
-  if (!tile) return;
-
-  const oldVideo = tile.querySelector("video.participant-video");
-  const oldTime = oldVideo && Number.isFinite(oldVideo.currentTime) ? oldVideo.currentTime : 0;
-  const wasPaused = oldVideo ? oldVideo.paused : false;
-
-  const replacement = document.createElement("div");
-  replacement.innerHTML = participantTile(person);
-  const newTile = replacement.firstElementChild;
-  tile.replaceWith(newTile);
-
-  const newVideo = newTile.querySelector("video.participant-video");
-  if (newVideo) {
-    newVideo.volume = 1;
-    const isSameSource = oldVideo && (oldVideo.currentSrc || oldVideo.src) === (newVideo.currentSrc || newVideo.src);
-    if (isSameSource && oldTime > 0) {
-      newVideo.addEventListener("loadedmetadata", function restoreTime() {
-        try {
-          newVideo.currentTime = Math.min(oldTime, Math.max(0, newVideo.duration - 0.05));
-        } catch (error) {}
-        if (!wasPaused) newVideo.play().catch(function(){});
-      }, { once: true });
-    } else {
-      newVideo.play().catch(function(){});
-    }
-  }
-}
-
-function updateParticipantsListOnly() {
-  if (!state.participantsOpen) return;
-  const panel = document.querySelector(".participants-panel");
-  if (!panel) return;
-  const replacement = document.createElement("div");
-  replacement.innerHTML = renderParticipants();
-  const newPanel = replacement.firstElementChild;
-  panel.replaceWith(newPanel);
-  bind();
 }
 
 function renderMeeting() {
@@ -390,17 +466,21 @@ function renderMeeting() {
 }
 
 function renderParticipants() {
+  normalizeHosts();
   const safeDisplayName = escapeHtml(state.displayName);
   const myVideos = state.myVideos || [];
+  const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
-    '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>Host · You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + '</span></div><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button></div>' +
+    '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button><div class="participant-list">' +
     state.fakePeople.map(function(p){
       const videos = getVideos(p);
       const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
       const keyText = state.keybinds[p.id] ? " · Cam " + state.keybinds[p.id].toUpperCase() : "";
       const nextText = state.nextKeybinds[p.id] ? " · Next " + state.nextKeybinds[p.id].toUpperCase() : "";
-      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + (p.role || "Participant") + cameraText + keyText + nextText + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon("mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      const audioText = state.audioKeybinds[p.id] ? " · Audio " + state.audioKeybinds[p.id].toUpperCase() : "";
+      const hostText = p.id === state.hostId ? "Host" : "Participant";
+      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + keyText + nextText + audioText + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon("mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
@@ -414,18 +494,24 @@ function openAddPerson() {
   openParticipantEditor(null);
 }
 
+function openAddPerson() {
+  openParticipantEditor(null);
+}
+
 function openParticipantEditor(personId) {
   const isNew = personId === null;
   const isMe = personId === "me";
   const existing = !isNew && getParticipant(personId);
   const person = isNew
-    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), videos: [], currentVideoIndex: 0, cameraVisible: true }
+    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true }
     : existing;
   if (!person) return;
 
   const videos = getVideos(person);
   const currentKey = isNew ? "" : (state.keybinds[personId] || "");
   const currentNextKey = isNew ? "" : (state.nextKeybinds[personId] || "");
+  const currentAudioKey = isNew ? "" : (state.audioKeybinds[personId] || "");
+  const autoPlayNext = isNew ? false : (isMe ? state.myAutoPlayNext : person.autoPlayNext === true);
   const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
 
   const modal = document.createElement("div");
@@ -435,7 +521,7 @@ function openParticipantEditor(personId) {
       '<button type="button" class="modal-close" data-close>×</button>' +
       '<span class="eyebrow">' + (isNew ? "Participants" : (isMe ? "Your participant" : "Fake participant")) + '</span>' +
       '<h2>' + (isNew ? "Add a fake person" : (isMe ? "Edit your meeting identity" : "Edit fake person")) + '</h2>' +
-      '<p class="muted">' + (isNew ? "Add multiple video clips and two keyboard shortcuts." : "Change the name, video playlist, or keyboard shortcuts.") + '</p>' +
+      '<p class="muted">' + (isNew ? "Add multiple video clips and camera controls." : "Change the name, video playlist, autoplay behavior, or keyboard shortcuts.") + '</p>' +
       '<label class="field-label">Display name<input name="name" required maxlength="28" value="' + escapeHtml(person.name) + '" placeholder="Taylor Kim" autofocus></label>' +
       '<label class="field-label">Add video files<input name="video" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" multiple></label>' +
       '<div class="file-help">' + (videos.length ? videos.length + " video" + (videos.length === 1 ? "" : "s") + " currently assigned. New files are added." : "Select multiple MP4 or phone videos at once.") + '</div>' +
@@ -443,7 +529,11 @@ function openParticipantEditor(personId) {
       '<label class="field-label">Camera keybind<input name="keybind" class="keybind-input" value="' + escapeHtml(currentKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
       '<div class="file-help">Show or hide this person’s camera.</div>' +
       '<label class="field-label">Next video keybind<input name="nextKeybind" class="keybind-input" value="' + escapeHtml(currentNextKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
-      '<div class="file-help">Switch to the next video. The playlist wraps back to the first clip.</div>' +
+      '<div class="file-help">Switch to the next video without changing other participants.</div>' +
+      '<label class="field-label">Audio keybind<input name="audioKeybind" class="keybind-input" value="' + escapeHtml(currentAudioKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
+      '<div class="file-help">Toggle this person’s MP4 audio on or off.</div>' +
+      '<label class="check-row autoplay-row"><input name="autoPlayNext" type="checkbox" ' + (autoPlayNext ? "checked" : "") + '><span>Auto-play the next video when this one ends</span></label>' +
+      '<div class="file-help">Off: the camera turns off when the video ends. On: the playlist advances in order.</div>' +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
       (!isNew && videos.length > 1 ? '<button type="button" class="secondary" data-next-video>Play next now</button>' : '') +
       '</div>' +
@@ -477,9 +567,11 @@ function openParticipantEditor(personId) {
         state.myVideoIndex = 0;
         state.cameraOn = false;
         state.cameraHidden.me = true;
+        state.needsNextOnCamera = false;
       } else {
         person.videos = [];
         person.currentVideoIndex = 0;
+        person.needsNextOnCamera = false;
       }
       modal.remove();
       render();
@@ -496,12 +588,14 @@ function openParticipantEditor(personId) {
       }
       delete state.keybinds[personId];
       delete state.nextKeybinds[personId];
+      delete state.audioKeybinds[personId];
+      normalizeHosts();
       modal.remove();
       render();
     });
   }
 
-  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"]').forEach(function(input) {
+  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"]').forEach(function(input) {
     input.addEventListener("keydown", function(e) {
       if (["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
       e.preventDefault();
@@ -520,8 +614,10 @@ function openParticipantEditor(personId) {
     const name = String(fd.get("name") || "").trim() || "Guest";
     const files = fd.getAll("video");
     const clearVideos = form.querySelector('[name="clearVideos"]').checked;
+    const autoPlay = form.querySelector('[name="autoPlayNext"]').checked;
     const key = String(fd.get("keybind") || "").trim();
     const nextKey = String(fd.get("nextKeybind") || "").trim();
+    const audioKey = String(fd.get("audioKeybind") || "").trim();
 
     if (isNew) {
       const newPerson = {
@@ -532,44 +628,57 @@ function openParticipantEditor(personId) {
         hue: Math.floor(Math.random() * 360),
         videos: [],
         currentVideoIndex: 0,
-        cameraVisible: true
+        cameraVisible: true,
+        autoPlayNext: autoPlay,
+        audioOn: true,
+        needsNextOnCamera: false
       };
       addVideoFiles(newPerson, files);
       state.fakePeople.push(newPerson);
+      normalizeHosts();
       setPersonKeybind(newPerson.id, key);
       setNextKeybind(newPerson.id, nextKey);
+      setAudioKeybind(newPerson.id, audioKey);
     } else if (isMe) {
       state.displayName = name;
+      state.myAutoPlayNext = autoPlay;
       if (clearVideos) {
         revokeVideos(state.myVideos);
         state.myVideos = [];
         state.myVideoIndex = 0;
         state.cameraOn = false;
         state.cameraHidden.me = true;
+        state.needsNextOnCamera = false;
       } else {
         addVideoFiles({ id: "me" }, files);
         if (state.myVideos.length) {
           state.cameraOn = true;
           state.cameraHidden.me = false;
+          state.needsNextOnCamera = false;
         }
       }
       setPersonKeybind("me", key);
       setNextKeybind("me", nextKey);
+      setAudioKeybind("me", audioKey);
     } else {
       const target = state.fakePeople.find(function(p) { return p.id === personId; });
       if (!target) return;
       target.name = name;
       target.initials = initialsFor(name);
+      target.autoPlayNext = autoPlay;
       if (clearVideos) {
         revokeVideos(target.videos);
         target.videos = [];
         target.currentVideoIndex = 0;
+        target.needsNextOnCamera = false;
       } else {
         addVideoFiles(target, files);
       }
       if (target.videos.length) target.cameraVisible = true;
       setPersonKeybind(personId, key);
       setNextKeybind(personId, nextKey);
+      setAudioKeybind(personId, audioKey);
+      normalizeHosts();
     }
 
     modal.remove();
@@ -599,6 +708,16 @@ function openFakeCameraPicker() {
   input.click();
 }
 
+function wireParticipantVideo(video) {
+  if (!video || video.dataset.wired === "1") return;
+  video.dataset.wired = "1";
+  video.volume = 1;
+  video.addEventListener("ended", function() {
+    handleVideoEnded(video.dataset.personId);
+  });
+  video.play().catch(function(){});
+}
+
 function bind() {
   document.querySelectorAll("[data-page]").forEach(function(el){
     el.addEventListener("click", function(){ state.page = el.dataset.page; render(); });
@@ -620,38 +739,28 @@ function bind() {
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
         document.querySelectorAll("video.participant-video").forEach(function(v) {
-          v.muted = !state.audioEnabled;
+          const person = getParticipant(v.dataset.personId);
+          v.muted = !state.audioEnabled || !isPersonAudioOn(person);
           v.volume = 1;
-          if (state.audioEnabled) v.play().catch(function(){});
+          if (!v.muted) v.play().catch(function(){});
         });
         render();
-        if (state.audioEnabled) {
-          document.querySelectorAll("video.participant-video").forEach(function(v) {
-            v.muted = false;
-            v.volume = 1;
-            v.play().catch(function(){});
-          });
-        }
         return;
       }
       if (a === "add-person") { openAddPerson(); return; }
       if (a === "edit-person") { openParticipantEditor(el.dataset.personId); return; }
       if (a === "add-video") { openFakeCameraPicker(); return; }
+      if (a === "toggle-person-audio") {
+        const personId = el.dataset.personId;
+        setAudioForPerson(personId, !isPersonAudioOn(getParticipant(personId)));
+        return;
+      }
       if (a === "contacts") { alert("Contacts is a demo placeholder."); return; }
       render();
     });
   });
-  document.querySelectorAll("video.participant-video").forEach(function(v){
-    v.volume = 1;
-    v.addEventListener("ended", function() {
-      const personId = v.dataset.personId;
-      const person = getParticipant(personId);
-      if (!person) return;
-      if (getVideos(person).length > 1) {
-        advancePersonVideo(personId);
-      }
-    });
-    v.play().catch(function(){});
+  document.querySelectorAll("video.participant-video").forEach(function(v) {
+    wireParticipantVideo(v);
   });
 }
 
@@ -678,7 +787,17 @@ window.addEventListener("keydown", function(e) {
   if (nextPersonId) {
     e.preventDefault();
     advancePersonVideo(nextPersonId);
+    return;
+  }
+
+  const audioPersonId = Object.keys(state.audioKeybinds).find(function(id) {
+    return state.audioKeybinds[id] === key;
+  });
+  if (audioPersonId) {
+    e.preventDefault();
+    setAudioForPerson(audioPersonId, !isPersonAudioOn(getParticipant(audioPersonId)));
   }
 });
 
+normalizeHosts();
 render();
