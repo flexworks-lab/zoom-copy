@@ -40,6 +40,7 @@ const state = {
   nextKeybinds: {},
   audioKeybinds: {},
   leaveKeybinds: {},
+  pauseKeybinds: {},
   leaveHistory: [],
   myAudioOn: true,
   audioEnabled: true,
@@ -177,6 +178,7 @@ async function buildSavedMeetingState() {
     nextKeybinds: cloneValue(state.nextKeybinds) || {},
     audioKeybinds: cloneValue(state.audioKeybinds) || {},
     leaveKeybinds: cloneValue(state.leaveKeybinds) || {},
+    pauseKeybinds: cloneValue(state.pauseKeybinds) || {},
     myAudioOn: state.myAudioOn,
     audioEnabled: state.audioEnabled,
     recordingNumber: state.recordingNumber,
@@ -335,6 +337,7 @@ function restoreMeetingRecord(record) {
   state.nextKeybinds = saved.nextKeybinds || {};
   state.audioKeybinds = saved.audioKeybinds || {};
   state.leaveKeybinds = saved.leaveKeybinds || {};
+  state.pauseKeybinds = saved.pauseKeybinds || {};
   state.myAudioOn = saved.myAudioOn !== false;
   state.audioEnabled = saved.audioEnabled !== false;
   state.recordingNumber = Number(saved.recordingNumber) || 0;
@@ -787,6 +790,16 @@ function setLeaveKeybind(personId, key) {
   state.leaveKeybinds[personId] = normalized;
 }
 
+function setPauseKeybind(personId, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  delete state.pauseKeybinds[personId];
+  if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
+  Object.keys(state.pauseKeybinds).forEach(function(id) {
+    if (id !== personId && state.pauseKeybinds[id] === normalized) delete state.pauseKeybinds[id];
+  });
+  state.pauseKeybinds[personId] = normalized;
+}
+
 const leaveSound = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
 leaveSound.preload = "auto";
 leaveSound.volume = 0.74;
@@ -845,7 +858,8 @@ function leaveMeetingAsMe() {
       camera: state.keybinds.me || "",
       next: state.nextKeybinds.me || "",
       audio: state.audioKeybinds.me || "",
-      leave: state.leaveKeybinds.me || ""
+      leave: state.leaveKeybinds.me || "",
+      pause: state.pauseKeybinds.me || ""
     }
   });
   if (state.leaveHistory.length > 50) state.leaveHistory.shift();
@@ -880,7 +894,8 @@ function leavePerson(personId) {
       camera: state.keybinds[personId] || "",
       next: state.nextKeybinds[personId] || "",
       audio: state.audioKeybinds[personId] || "",
-      leave: state.leaveKeybinds[personId] || ""
+      leave: state.leaveKeybinds[personId] || "",
+      pause: state.pauseKeybinds[personId] || ""
     }
   });
   if (state.leaveHistory.length > 50) state.leaveHistory.shift();
@@ -925,6 +940,7 @@ function undoLastLeave() {
     setNextKeybind("me", snapshot.keybinds.next);
     setAudioKeybind("me", snapshot.keybinds.audio);
     setLeaveKeybind("me", snapshot.keybinds.leave);
+    setPauseKeybind("me", snapshot.keybinds.pause);
   } else if (snapshot.type === "fake" && snapshot.person) {
     if (!state.fakePeople.some(function(p) { return p.id === snapshot.person.id; })) {
       state.fakePeople.push(snapshot.person);
@@ -935,6 +951,7 @@ function undoLastLeave() {
       setNextKeybind(snapshot.person.id, snapshot.keybinds.next);
       setAudioKeybind(snapshot.person.id, snapshot.keybinds.audio);
       setLeaveKeybind(snapshot.person.id, snapshot.keybinds.leave);
+      setPauseKeybind(snapshot.person.id, snapshot.keybinds.pause);
     }
 
     if (snapshot.hostIdBeforeLeave === snapshot.person.id) {
@@ -988,6 +1005,7 @@ function joinBackParticipant(personId) {
   setNextKeybind(person.id, snapshot.keybinds?.next);
   setAudioKeybind(person.id, snapshot.keybinds?.audio);
   setLeaveKeybind(person.id, snapshot.keybinds?.leave);
+  setPauseKeybind(person.id, snapshot.keybinds?.pause);
 
   if (snapshot.hostIdBeforeLeave === person.id) {
     state.hostId = person.id;
@@ -1204,11 +1222,13 @@ function participantTile(person) {
   const nextKey = state.nextKeybinds[person.id] || "—";
   const audioKey = state.audioKeybinds[person.id] || "—";
   const leaveKey = state.leaveKeybinds[person.id] || "—";
+  const pauseKey = state.pauseKeybinds[person.id] || "—";
   const keybindBadges =
     '<span class="keybind-badge">Cam:' + escapeHtml(cameraKey.toUpperCase()) + '</span>' +
     '<span class="next-key-badge">Next:' + escapeHtml(nextKey.toUpperCase()) + '</span>' +
     '<span class="audio-key-badge">Audio:' + escapeHtml(audioKey.toUpperCase()) + '</span>' +
-    '<span class="leave-key-badge">Leave:' + escapeHtml(leaveKey.toUpperCase()) + '</span>';
+    '<span class="leave-key-badge">Leave:' + escapeHtml(leaveKey.toUpperCase()) + '</span>' +
+    '<span class="pause-key-badge">Pause:' + escapeHtml(pauseKey.toUpperCase()) + '</span>';
 
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
@@ -1378,6 +1398,7 @@ function openParticipantEditor(personId) {
   const currentNextKey = isNew ? "" : (state.nextKeybinds[personId] || "");
   const currentAudioKey = isNew ? "" : (state.audioKeybinds[personId] || "");
   const currentLeaveKey = isNew ? "" : (state.leaveKeybinds[personId] || "");
+  const currentPauseKey = isNew ? "" : (state.pauseKeybinds[personId] || "");
   const autoPlayNext = isNew ? false : (isMe ? state.myAutoPlayNext : person.autoPlayNext === true);
   const autoCameraOff = isNew ? true : (isMe ? state.myAutoCameraOff !== false : person.autoCameraOff !== false);
   const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
@@ -1407,6 +1428,8 @@ function openParticipantEditor(personId) {
       '<div class="file-help">Off: the camera stays on the last video frame. On: the camera turns off when the video ends.</div>' +
       '<label class="check-row autoplay-row"><input name="autoCameraOff" type="checkbox" ' + (autoCameraOff ? "checked" : "") + '><span>Turn camera off when video ends</span></label>' +
       '<div class="file-help">Disable this to keep the camera tile visible after a video finishes.</div>' +
+      '<label class="field-label">Pause / Play clip keybind<input name="pauseKeybind" class="keybind-input" value="' + escapeHtml(currentPauseKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
+      '<div class="file-help">Toggle this person’s clip between Pause and Play with one key.</div>' +
       '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
       '<div class="file-help">This person leaves the meeting when the key is pressed. Press 0 to undo the last leave.</div>' +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
@@ -1483,13 +1506,14 @@ function openParticipantEditor(personId) {
       delete state.nextKeybinds[personId];
       delete state.audioKeybinds[personId];
       delete state.leaveKeybinds[personId];
+      delete state.pauseKeybinds[personId];
       normalizeHosts();
       closeModal();
       render();
     });
   }
 
-  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"], [name="leaveKeybind"]').forEach(function(input) {
+  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"], [name="pauseKeybind"], [name="leaveKeybind"]').forEach(function(input) {
     input.addEventListener("keydown", function(e) {
       if (["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
       e.preventDefault();
@@ -1527,6 +1551,7 @@ function openParticipantEditor(personId) {
       const nextKey = String(fd.get("nextKeybind") || "").trim();
       const audioKey = String(fd.get("audioKeybind") || "").trim();
       const leaveKey = String(fd.get("leaveKeybind") || "").trim();
+      const pauseKey = String(fd.get("pauseKeybind") || "").trim();
       const autoCameraOff = form.querySelector('[name="autoCameraOff"]').checked;
 
       if (isNew) {
@@ -1552,6 +1577,7 @@ function openParticipantEditor(personId) {
         setNextKeybind(newPerson.id, nextKey);
         setAudioKeybind(newPerson.id, audioKey);
         setLeaveKeybind(newPerson.id, leaveKey);
+        setPauseKeybind(newPerson.id, pauseKey);
       } else if (isMe) {
         state.displayName = name;
         if (clearAvatar) {
@@ -1582,6 +1608,7 @@ function openParticipantEditor(personId) {
         setNextKeybind("me", nextKey);
         setAudioKeybind("me", audioKey);
         setLeaveKeybind("me", leaveKey);
+        setPauseKeybind("me", pauseKey);
       } else {
         const target = state.fakePeople.find(function(p) { return p.id === personId; });
         if (!target) throw new Error("This participant no longer exists.");
@@ -1610,6 +1637,7 @@ function openParticipantEditor(personId) {
         setNextKeybind(personId, nextKey);
         setAudioKeybind(personId, audioKey);
         setLeaveKeybind(personId, leaveKey);
+        setPauseKeybind(personId, pauseKey);
         normalizeHosts();
       }
 
@@ -2828,6 +2856,15 @@ window.addEventListener("keydown", function(e) {
   if (leavePersonId) {
     e.preventDefault();
     leavePerson(leavePersonId);
+    return;
+  }
+
+  const pausePersonId = Object.keys(state.pauseKeybinds).find(function(id) {
+    return state.pauseKeybinds[id] === key;
+  });
+  if (pausePersonId) {
+    e.preventDefault();
+    togglePersonClip(pausePersonId);
     return;
   }
 
