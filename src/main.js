@@ -74,7 +74,8 @@ const state = {
   roomMode: "local",
   remoteMeetingId: "",
   savedMeetings: [],
-  savedMeetingsLoading: true
+  savedMeetingsLoading: true,
+  account: null
 };
 
 const TUTORIAL_STORAGE_KEY = "zoom-copy-tutorial-complete";
@@ -209,7 +210,7 @@ function showFirstTimeTutorial() {
 const recordingAvatarImages = new Map();
 
 const MEETING_DB_NAME = "zoom-copy-meeting-storage";
-const MEETING_DB_VERSION = 2;
+const MEETING_DB_VERSION = 3;
 const MEETING_RECORD_ID = "active";
 let meetingDbPromise = null;
 let meetingSaveTimer = 0;
@@ -236,6 +237,9 @@ function openMeetingDb() {
       if (!db.objectStoreNames.contains("savedMeetings")) {
         db.createObjectStore("savedMeetings", { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains("accounts")) {
+        db.createObjectStore("accounts", { keyPath: "id" });
+      }
     };
 
     request.onsuccess = function() {
@@ -256,6 +260,407 @@ function openMeetingDb() {
 
 function cloneValue(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+
+const ACCOUNT_STORAGE_KEY = "zoom-copy-active-account";
+const ACCOUNT_NAME_MAX = 40;
+
+function makeId(prefix) {
+  const randomPart = window.crypto && typeof window.crypto.randomUUID === "function"
+    ? window.crypto.randomUUID()
+    : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+  return prefix + "-" + randomPart;
+}
+
+function getAccountInitials(name) {
+  const parts = String(name || "My Account").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "ME";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+function getActiveAccountId() {
+  try { return localStorage.getItem(ACCOUNT_STORAGE_KEY) || ""; } catch (error) { return ""; }
+}
+
+function setActiveAccountId(accountId) {
+  try { localStorage.setItem(ACCOUNT_STORAGE_KEY, String(accountId || "")); } catch (error) {}
+}
+
+function getAccountRecords() {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("accounts", "readonly");
+      const request = tx.objectStore("accounts").getAll();
+      request.onsuccess = function() {
+        resolve(Array.isArray(request.result) ? request.result : []);
+      };
+      request.onerror = function() {
+        reject(request.error || new Error("Could not load local accounts."));
+      };
+    });
+  });
+}
+
+function putAccountRecord(account) {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("accounts", "readwrite");
+      tx.objectStore("accounts").put(account);
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error || new Error("Could not save the local account.")); };
+      tx.onabort = function() { reject(tx.error || new Error("Account save was aborted.")); };
+    });
+  });
+}
+
+async function migrateSavedMeetingsToAccount(accountId) {
+  const records = await getSavedMeetingRecords("");
+  for (const record of records.filter(function(item) { return !item.accountId; })) {
+    record.accountId = accountId;
+    await putSavedMeetingRecord(record);
+  }
+
+  const active = await getMeetingRecord();
+  if (active && !active.accountId) {
+    active.accountId = accountId;
+    await putMeetingRecord(active);
+  }
+}
+
+async function loadAccount() {
+  let accounts = [];
+  try {
+    accounts = await getAccountRecords();
+  } catch (error) {
+    console.warn("Local accounts could not be loaded.", error);
+  }
+
+  const activeId = getActiveAccountId();
+  let account = accounts.find(function(item) { return item.id === activeId; });
+
+  if (!account) {
+    account = accounts[0] || {
+      id: makeId("account"),
+      name: "My Account",
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    if (!accounts.some(function(item) { return item.id === account.id; })) {
+      await putAccountRecord(account);
+    }
+    setActiveAccountId(account.id);
+  }
+
+  state.account = account;
+  await migrateSavedMeetingsToAccount(account.id).catch(function(error) {
+    console.warn("Saved meeting account migration failed.", error);
+  });
+  return account;
+}
+
+async function createLocalAccount(name) {
+  const cleanName = String(name || "").trim().slice(0, ACCOUNT_NAME_MAX);
+  if (!cleanName) throw new Error("Enter an account name.");
+
+  const account = {
+    id: makeId("account"),
+    name: cleanName,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  await putAccountRecord(account);
+  state.account = account;
+  setActiveAccountId(account.id);
+  state.savedMeetings = [];
+  await loadSavedMeetingLibrary();
+  return account;
+}
+
+async function switchLocalAccount(accountId) {
+  const accounts = await getAccountRecords();
+  const next = accounts.find(function(item) { return item.id === String(accountId); });
+  if (!next) {
+    alert("That account could not be found.");
+    return false;
+  }
+
+  if (state.meetingStarted && state.roomMode !== "watcher") {
+    try { await saveMeetingState(); } catch (error) {}
+  }
+
+  destroyRoomConnection();
+  state.page = "home";
+  state.meetingStarted = false;
+  state.roomMode = "local";
+  state.remoteMeetingId = "";
+  state.participantOptionsOpen = false;
+  state.account = next;
+  setActiveAccountId(next.id);
+  await loadSavedMeetingLibrary();
+  render();
+  return true;
+}
+
+function openAccountDialog() {
+  const existing = document.querySelector(".account-modal-backdrop");
+  if (existing) existing.remove();
+
+  getAccountRecords().then(function(accounts) {
+    const modal = document.createElement("div");
+    modal.className = "tutorial-backdrop account-modal-backdrop";
+    modal.innerHTML =
+      '<div class="tutorial-card account-card" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title">' +
+        '<button type="button" class="tutorial-close account-close" aria-label="Close account dialog">×</button>' +
+        '<div class="tutorial-icon">' + icon("users") + '</div>' +
+        '<span class="eyebrow">Local accounts</span>' +
+        '<h2 id="account-dialog-title">Choose an account</h2>' +
+        '<p class="tutorial-body">Accounts keep separate meeting libraries on this browser. They are not cloud logins.</p>' +
+        '<div class="account-list">' +
+          accounts.map(function(account) {
+            const active = state.account && account.id === state.account.id;
+            return '<button type="button" class="account-choice ' + (active ? "active" : "") + '" data-account-id="' + escapeHtml(account.id) + '">' +
+              '<span class="avatar account-avatar">' + escapeHtml(getAccountInitials(account.name)) + '</span>' +
+              '<span class="account-choice-copy"><strong>' + escapeHtml(account.name) + '</strong><small>' + (active ? "Current account" : "Switch to this account") + '</small></span>' +
+              '<span class="account-check">' + (active ? "✓" : "›") + '</span>' +
+            '</button>';
+          }).join("") +
+        '</div>' +
+        '<div class="account-create">' +
+          '<label class="field-label" for="new-account-name">Create a new local account</label>' +
+          '<div class="account-create-row"><input id="new-account-name" type="text" maxlength="' + ACCOUNT_NAME_MAX + '" placeholder="Account name"><button type="button" class="primary account-create-button">Create</button></div>' +
+          '<p class="account-error" data-account-error></p>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(modal);
+
+    const close = function() { modal.remove(); };
+    modal.querySelector(".account-close").addEventListener("click", close);
+    modal.addEventListener("click", function(event) {
+      if (event.target === modal) close();
+    });
+
+    modal.querySelectorAll("[data-account-id]").forEach(function(button) {
+      button.addEventListener("click", async function() {
+        const nextId = button.dataset.accountId;
+        if (state.account && nextId === state.account.id) {
+          close();
+          return;
+        }
+        button.disabled = true;
+        await switchLocalAccount(nextId);
+        close();
+      });
+    });
+
+    const input = modal.querySelector("#new-account-name");
+    const error = modal.querySelector("[data-account-error]");
+    modal.querySelector(".account-create-button").addEventListener("click", async function() {
+      try {
+        await createLocalAccount(input.value);
+        destroyRoomConnection();
+        state.page = "home";
+        state.meetingStarted = false;
+        state.roomMode = "local";
+        state.remoteMeetingId = "";
+        render();
+        close();
+      } catch (errorValue) {
+        error.textContent = errorValue && errorValue.message ? errorValue.message : "Could not create the account.";
+      }
+    });
+    input.addEventListener("keydown", function(event) {
+      if (event.key === "Enter") modal.querySelector(".account-create-button").click();
+    });
+    input.focus();
+  }).catch(function(error) {
+    console.error("Could not open account dialog.", error);
+    alert("Your local accounts could not be loaded.");
+  });
+}
+
+async function blobToDataUrl(blob) {
+  return new Promise(function(resolve, reject) {
+    if (!blob) {
+      reject(new Error("Missing meeting asset."));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = function() { resolve(String(reader.result || "")); };
+    reader.onerror = function() { reject(reader.error || new Error("Could not export meeting data.")); };
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function dataUrlToBlob(dataUrl, fallbackType) {
+  const value = String(dataUrl || "");
+  const comma = value.indexOf(",");
+  if (comma < 0) throw new Error("Invalid meeting asset data.");
+  const header = value.slice(0, comma);
+  const body = value.slice(comma + 1);
+  const mimeMatch = header.match(/data:([^;]+)/i);
+  const mimeType = mimeMatch ? mimeMatch[1] : (fallbackType || "application/octet-stream");
+  const binary = atob(body);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType });
+}
+
+async function exportMeetingBackup(meetingId) {
+  let record = null;
+
+  try {
+    if (meetingId) {
+      record = await getSavedMeetingRecord(meetingId);
+    } else if (state.meetingStarted && state.account) {
+      const built = await buildSavedMeetingState();
+      record = Object.assign({}, built.record, {
+        id: built.record.state.meetingId,
+        accountId: state.account.id
+      });
+    } else if (state.account) {
+      record = await getSavedMeetingRecord(state.meetingId);
+    }
+
+    if (!record || !record.state) {
+      alert("There is no saved meeting available to export yet.");
+      return false;
+    }
+
+    const assets = [];
+    for (const asset of (record.assets || [])) {
+      if (!asset || !asset.blob) continue;
+      assets.push({
+        id: asset.id,
+        type: asset.type || asset.blob.type || "application/octet-stream",
+        dataUrl: await blobToDataUrl(asset.blob)
+      });
+    }
+
+    const payload = {
+      format: "zoom-copy-meeting",
+      version: 1,
+      exportedAt: Date.now(),
+      account: {
+        id: state.account && state.account.id || null,
+        name: state.account && state.account.name || "My Account"
+      },
+      record: {
+        id: String(record.id || record.state.meetingId || ""),
+        accountId: state.account && state.account.id || null,
+        version: record.version || 1,
+        savedAt: record.savedAt || Date.now(),
+        state: record.state,
+        assets: assets
+      }
+    };
+
+    const meetingIdForFile = normalizeMeetingId(record.state.meetingId || record.id) || "meeting";
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "zoom-copy-meeting-" + meetingIdForFile + ".zoomcopy";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    return true;
+  } catch (error) {
+    console.error("Meeting export failed.", error);
+    alert("The meeting backup could not be exported. Try again after the meeting finishes loading.");
+    return false;
+  }
+}
+
+async function importMeetingBackup(file) {
+  if (!file) return false;
+
+  try {
+    const raw = await file.text();
+    const payload = JSON.parse(raw);
+    if (!payload || payload.format !== "zoom-copy-meeting" || !payload.record || !payload.record.state) {
+      throw new Error("That file is not a Zoom Copy meeting backup.");
+    }
+
+    const record = {
+      id: String(payload.record.id || payload.record.state.meetingId || ""),
+      accountId: state.account && state.account.id || null,
+      version: Number(payload.record.version) || 1,
+      savedAt: Date.now(),
+      state: payload.record.state,
+      assets: []
+    };
+    if (!record.id || !record.state.meetingId) {
+      throw new Error("The meeting backup is missing its meeting ID.");
+    }
+    record.state.accountId = record.accountId;
+
+    const incomingAssets = Array.isArray(payload.record.assets) ? payload.record.assets : [];
+    for (const asset of incomingAssets) {
+      if (!asset || !asset.id || !asset.dataUrl) continue;
+      record.assets.push({
+        id: asset.id,
+        type: asset.type || "",
+        blob: await dataUrlToBlob(asset.dataUrl, asset.type)
+      });
+    }
+
+    const existing = await getSavedMeetingRecord(record.state.meetingId);
+    if (existing && !confirm("A meeting with this ID already exists in this account. Replace it with the imported backup?")) {
+      return false;
+    }
+
+    record.id = String(record.state.meetingId);
+    await putSavedMeetingRecord(record);
+    await putMeetingRecord(record);
+    rememberSavedMeeting(record);
+
+    destroyRoomConnection();
+    revokeVideos(state.myVideos || []);
+    (state.fakePeople || []).forEach(function(person) {
+      revokeVideos(person.videos || []);
+      revokeBlob(person.avatarUrl);
+    });
+    revokeBlob(state.myAvatarUrl);
+
+    restoringMeeting = true;
+    try {
+      restoreMeetingRecord(record);
+    } finally {
+      restoringMeeting = false;
+    }
+
+    state.page = "meeting";
+    state.meetingStarted = true;
+    state.roomMode = "local";
+    state.remoteMeetingId = "";
+    state.participantOptionsOpen = false;
+    render();
+    restorePersistedPlayback();
+    startHostRoom();
+    rememberSavedMeeting(record);
+    return true;
+  } catch (error) {
+    console.error("Meeting import failed.", error);
+    alert(error && error.message ? error.message : "The meeting backup could not be imported.");
+    return false;
+  }
+}
+
+function openMeetingImportPicker() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".zoomcopy,.json,application/json";
+  input.style.display = "none";
+  document.body.appendChild(input);
+  input.addEventListener("change", function() {
+    const file = input.files && input.files[0];
+    input.remove();
+    if (file) importMeetingBackup(file);
+  }, { once: true });
+  input.click();
 }
 
 function capturePersistentPlaybackState() {
@@ -320,6 +725,7 @@ async function buildSavedMeetingState() {
   const saved = {
     version: 1,
     meetingId: state.meetingId,
+    accountId: state.account && state.account.id || null,
     micOn: state.micOn,
     cameraOn: state.cameraOn,
     shareOn: state.shareOn,
@@ -402,10 +808,13 @@ function putMeetingRecord(record) {
 }
 
 async function putSavedMeetingRecord(record) {
+  const normalized = Object.assign({}, record, {
+    accountId: record && record.accountId || state.account && state.account.id || null
+  });
   return openMeetingDb().then(function(db) {
     return new Promise(function(resolve, reject) {
       const tx = db.transaction("savedMeetings", "readwrite");
-      tx.objectStore("savedMeetings").put(record);
+      tx.objectStore("savedMeetings").put(normalized);
       tx.oncomplete = function() { resolve(); };
       tx.onerror = function() { reject(tx.error || new Error("Could not save the meeting to the library.")); };
       tx.onabort = function() { reject(tx.error || new Error("Meeting library save was aborted.")); };
@@ -413,13 +822,21 @@ async function putSavedMeetingRecord(record) {
   });
 }
 
-function getSavedMeetingRecords() {
+function getSavedMeetingRecords(accountId) {
   return openMeetingDb().then(function(db) {
     return new Promise(function(resolve, reject) {
       const tx = db.transaction("savedMeetings", "readonly");
       const request = tx.objectStore("savedMeetings").getAll();
       request.onsuccess = function() {
-        resolve(Array.isArray(request.result) ? request.result : []);
+        const records = Array.isArray(request.result) ? request.result : [];
+        if (accountId === "") {
+          resolve(records);
+          return;
+        }
+        const activeId = String(accountId || state.account && state.account.id || "");
+        resolve(records.filter(function(record) {
+          return String(record.accountId || "") === activeId;
+        }));
       };
       request.onerror = function() {
         reject(request.error || new Error("Could not load saved meetings."));
@@ -433,7 +850,15 @@ function getSavedMeetingRecord(meetingId) {
     return new Promise(function(resolve, reject) {
       const tx = db.transaction("savedMeetings", "readonly");
       const request = tx.objectStore("savedMeetings").get(String(meetingId));
-      request.onsuccess = function() { resolve(request.result || null); };
+      request.onsuccess = function() {
+        const record = request.result || null;
+        const activeId = String(state.account && state.account.id || "");
+        if (record && record.accountId && String(record.accountId) !== activeId) {
+          resolve(null);
+          return;
+        }
+        resolve(record);
+      };
       request.onerror = function() {
         reject(request.error || new Error("Could not open the saved meeting."));
       };
@@ -470,7 +895,7 @@ function rememberSavedMeeting(record) {
 
 async function loadSavedMeetingLibrary() {
   try {
-    const records = await getSavedMeetingRecords();
+    const records = await getSavedMeetingRecords(state.account && state.account.id);
     state.savedMeetings = records
       .map(savedMeetingPreview)
       .filter(function(item) { return Boolean(item.id); })
@@ -534,7 +959,8 @@ async function saveMeetingState() {
   try {
     const built = await buildSavedMeetingState();
     const libraryRecord = Object.assign({}, built.record, {
-      id: built.record.state.meetingId
+      id: built.record.state.meetingId,
+      accountId: state.account && state.account.id || null
     });
     await Promise.all([
       putMeetingRecord(built.record),
@@ -674,6 +1100,12 @@ async function restoreSavedMeeting() {
   restoringMeeting = true;
   try {
     const record = await getMeetingRecord();
+    if (!record) return false;
+    if (record.accountId && state.account && String(record.accountId) !== String(state.account.id)) return false;
+    if (!record.accountId && state.account) {
+      record.accountId = state.account.id;
+      try { await putMeetingRecord(record); } catch (error) {}
+    }
     return restoreMeetingRecord(record);
   } catch (error) {
     console.warn("Saved meeting could not be restored.", error);
@@ -1852,6 +2284,8 @@ function render() {
 }
 
 function shell(content, active) {
+  const accountName = state.account && state.account.name || "My Account";
+  const accountInitials = getAccountInitials(accountName);
   return '<div class="app-shell">' +
     '<aside class="sidebar">' +
       '<div class="brand"><span class="brand-mark">Z</span><span>Zoom Copy</span></div>' +
@@ -1861,39 +2295,47 @@ function shell(content, active) {
         '<button class="nav-item" data-action="contacts">' + icon("users") + '<span>Contacts</span></button>' +
         '<button class="nav-item ' + (active === "settings" ? "active" : "") + '" data-page="settings">' + icon("settings") + '<span>Settings</span></button>' +
       '</nav>' +
-      '<div class="sidebar-bottom"><button class="profile-chip" data-page="settings"><div class="avatar small">MC</div><div><strong>My account</strong><span>Available</span></div><span class="chevron">⌄</span></button></div>' +
+      '<div class="sidebar-bottom"><button class="profile-chip" data-action="open-account"><div class="avatar small">' + accountInitials + '</div><div><strong>' + escapeHtml(accountName) + '</strong><span>Local account</span></div><span class="chevron">⌄</span></button></div>' +
     '</aside><main class="page">' + content + '</main></div>';
 }
 
 function renderHome() {
+  const accountName = state.account && state.account.name || "My Account";
+  const accountInitials = getAccountInitials(accountName);
   const content =
-    '<header class="topbar"><div><span class="eyebrow">Meet smarter</span><h1>Good evening</h1></div><button class="icon-button" title="Settings" data-page="settings">' + icon("settings") + '</button></header>' +
+    '<header class="topbar"><div><span class="eyebrow">Meet smarter</span><h1>Good evening</h1><p class="account-subtitle"><span class="avatar tiny">' + escapeHtml(accountInitials) + '</span> ' + escapeHtml(accountName) + '</p></div><div class="topbar-actions"><button class="secondary account-top-button" data-action="open-account">' + icon("users") + ' Account</button><button class="icon-button" title="Settings" data-page="settings">' + icon("settings") + '</button></div></header>' +
     '<section class="hero-grid">' +
       '<article class="hero-card"><div class="hero-copy"><span class="pill">Your meeting space</span><h2>Meet, present, and test fake cameras in one place.</h2><p>Build a meeting with realistic participant tiles, local video files, and familiar call controls.</p><div class="hero-actions"><button class="primary" data-action="start-meeting">Start a meeting</button><button class="secondary" data-action="join-meeting">Join a meeting</button></div></div>' +
         '<div class="hero-visual"><div class="mini-window"><div class="mini-top"><span></span><span></span><span></span><b>Team standup</b><small>12:41</small></div><div class="mini-grid"><div class="mini-tile tile-a"><span>AM</span></div><div class="mini-tile tile-b"><span>JL</span></div><div class="mini-tile tile-c"><span>SR</span></div><div class="mini-tile tile-d"><span>MC</span></div></div></div></div>' +
       '</article>' +
-      '<div class="quick-column"><button class="quick-card" data-action="start-meeting"><div class="quick-icon blue">' + icon("video") + '</div><div><strong>New meeting</strong><span>Start instantly</span></div><b>›</b></button><button class="quick-card" data-action="open-participants"><div class="quick-icon green">' + icon("users") + '</div><div><strong>Fake participants</strong><span>Add people to your call</span></div><b>›</b></button><div class="tip-card"><span class="tip-label">SIMULATED CAMERA</span><strong>Upload a video file and use it as a meeting camera tile.</strong><p>Your file stays local to this browser session.</p></div></div>' +
+      '<div class="quick-column"><button class="quick-card" data-action="start-meeting"><div class="quick-icon blue">' + icon("video") + '</div><div><strong>New meeting</strong><span>Start instantly</span></div><b>›</b></button><button class="quick-card" data-action="open-participants"><div class="quick-icon green">' + icon("users") + '</div><div><strong>Fake participants</strong><span>Add people to your call</span></div><b>›</b></button><div class="tip-card"><span class="tip-label">SIMULATED CAMERA</span><strong>Upload a video file and use it as a meeting camera tile.</strong><p>Your files are stored in this browser account.</p></div></div>' +
     '</section>' +
-    '<section class="section"><div class="section-heading"><div><span class="eyebrow">Saved</span><h3>Meetings</h3></div><button class="text-button" data-action="start-meeting">New meeting</button></div><div class="meeting-list">' +
+    '<section class="section"><div class="section-heading"><div><span class="eyebrow">Saved in ' + escapeHtml(accountName) + '</span><h3>Meetings</h3></div><button class="text-button" data-action="start-meeting">New meeting</button></div><div class="meeting-list">' +
       (state.savedMeetingsLoading ? '<div class="saved-empty"><strong>Loading saved meetings…</strong></div>' :
         state.savedMeetings.length ? state.savedMeetings.map(function(meeting) {
           const savedDate = meeting.savedAt ? new Date(meeting.savedAt).toLocaleString() : "Saved locally";
           const videoText = meeting.videos ? meeting.videos + " video" + (meeting.videos === 1 ? "" : "s") : "No videos";
-          return '<div class="meeting-row saved-meeting-row"><div class="meeting-icon">' + icon("video") + '</div><div><strong>Meeting ' + escapeHtml(formatMeetingId(meeting.id)) + '</strong><span>' + escapeHtml(meeting.participants + " participant" + (meeting.participants === 1 ? "" : "s")) + " · " + escapeHtml(videoText) + " · Last saved " + escapeHtml(savedDate) + '</span></div><span class="meeting-id">' + escapeHtml(formatMeetingId(meeting.id)) + '</span><button class="join-small" data-action="open-saved-meeting" data-meeting-id="' + escapeHtml(meeting.id) + '">Open</button></div>';
+          return '<div class="meeting-row saved-meeting-row"><div class="meeting-icon">' + icon("video") + '</div><div><strong>Meeting ' + escapeHtml(formatMeetingId(meeting.id)) + '</strong><span>' + escapeHtml(meeting.participants + " participant" + (meeting.participants === 1 ? "" : "s")) + " · " + escapeHtml(videoText) + " · Last saved " + escapeHtml(savedDate) + '</span></div><span class="meeting-id">' + escapeHtml(formatMeetingId(meeting.id)) + '</span><button class="join-small" data-action="open-saved-meeting" data-meeting-id="' + escapeHtml(meeting.id) + '">Open</button><button class="join-small export-small" data-action="export-saved-meeting" data-meeting-id="' + escapeHtml(meeting.id) + '">Export</button></div>';
         }).join("") :
-        '<div class="saved-empty"><strong>No saved meetings yet</strong><span>Your meetings will automatically be saved here and stay available on this browser.</span></div>') +
+        '<div class="saved-empty"><strong>No saved meetings yet</strong><span>Your meetings are saved inside this local account. Export a backup before clearing browser data.</span></div>') +
     '</div></section>';
   return shell(content, "home");
 }
 
 function renderSettings() {
+  const accountName = state.account && state.account.name || "My Account";
+  const accountInitials = getAccountInitials(accountName);
   const content =
     '<header class="topbar"><div><span class="eyebrow">Preferences</span><h1>Settings</h1></div><button class="secondary settings-help-button" data-action="open-tutorial">Open tutorial</button></header>' +
     '<section class="settings-layout"><div class="settings-nav"><button class="settings-nav-item active">General</button><button class="settings-nav-item">Video</button><button class="settings-nav-item">Audio</button><button class="settings-nav-item">Meeting</button></div>' +
-    '<div class="settings-panel"><h2>General</h2><p class="muted">Tune the demo meeting experience.</p>' +
-    '<label class="setting-row"><span><strong>Open meetings in the demo room</strong><small>Skip the home screen when starting a meeting.</small></span><input type="checkbox" checked></label>' +
-    '<label class="setting-row"><span><strong>Remember fake participants</strong><small>Keep custom people for this browser tab.</small></span><input type="checkbox" checked></label>' +
-    '<div class="setting-note"><strong>Simulated camera</strong><p>Video files are rendered as local meeting feeds. They are not installed as an operating-system webcam device.</p></div></div></section>';
+    '<div class="settings-panel">' +
+      '<section class="account-settings-block"><div class="account-settings-header"><div><span class="eyebrow">Account</span><h2>' + escapeHtml(accountName) + '</h2><p class="muted">A local account that keeps its own saved meeting library on this browser.</p></div><div class="avatar account-settings-avatar">' + escapeHtml(accountInitials) + '</div></div><div class="account-settings-actions"><button class="secondary" data-action="open-account">' + icon("users") + ' Switch account</button><button class="primary" data-action="open-account">New account</button></div></section>' +
+      '<section class="data-settings-block"><div><span class="eyebrow">Meeting data</span><h2>Backups</h2><p class="muted">Export a meeting to a file so you can restore it later if local saving fails or browser storage is cleared.</p></div><div class="data-action-grid"><button class="secondary data-action-card" data-action="export-current-meeting"><strong>Export current meeting</strong><span>Save a .zoomcopy backup</span></button><button class="secondary data-action-card" data-action="import-meeting"><strong>Import meeting backup</strong><span>Restore a .zoomcopy file</span></button></div></section>' +
+      '<section class="general-settings-block"><h2>General</h2><p class="muted">Tune the demo meeting experience.</p>' +
+      '<label class="setting-row"><span><strong>Open meetings in the demo room</strong><small>Skip the home screen when starting a meeting.</small></span><input type="checkbox" checked></label>' +
+      '<label class="setting-row"><span><strong>Remember fake participants</strong><small>Keep custom people for this browser account.</small></span><input type="checkbox" checked></label>' +
+      '<div class="setting-note"><strong>Storage note</strong><p>Accounts and meetings are stored locally in this browser. Exported .zoomcopy files are the portable backup.</p></div></section>' +
+    '</div></section>';
   return shell(content, "settings");
 }
 
@@ -3850,6 +4292,22 @@ function bind() {
         openSavedMeeting(el.dataset.meetingId);
         return;
       }
+      if (a === "export-saved-meeting") {
+        exportMeetingBackup(el.dataset.meetingId);
+        return;
+      }
+      if (a === "export-current-meeting") {
+        exportMeetingBackup();
+        return;
+      }
+      if (a === "import-meeting") {
+        openMeetingImportPicker();
+        return;
+      }
+      if (a === "open-account") {
+        openAccountDialog();
+        return;
+      }
       if (a === "start-meeting") {
         destroyRoomConnection();
         state.meetingId = generateMeetingId();
@@ -4108,6 +4566,7 @@ window.addEventListener("keydown", function(e) {
 });
 
 async function bootMeetingApp() {
+  await loadAccount();
   await loadSavedMeetingLibrary();
   const restored = await restoreSavedMeeting();
   normalizeHosts();
