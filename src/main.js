@@ -1252,21 +1252,46 @@ async function stopRecording() {
 
 async function finishRecording(chunks, sourceType) {
   const sourceBlob = new Blob(chunks, { type: sourceType || "video/webm" });
+  let conversionError = null;
+
   try {
     const ffmpeg = await getRecordingFFmpeg();
+
+    try { await ffmpeg.deleteFile("meeting.webm"); } catch (error) {}
+    try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
+
     await ffmpeg.writeFile("meeting.webm", await fetchFile(sourceBlob));
-    await ffmpeg.exec([
-      "-i", "meeting.webm",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", "128k",
-      "-movflags", "+faststart",
-      "meeting.mp4"
-    ]);
+
+    // First use explicit codecs so the output is a real H.264/AAC MP4.
+    try {
+      await ffmpeg.exec([
+        "-threads", "1",
+        "-i", "meeting.webm",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        "meeting.mp4"
+      ]);
+    } catch (firstError) {
+      conversionError = firstError;
+      // Some FFmpeg builds choose their compiled-in MP4 codecs more reliably
+      // when no explicit encoder is forced, so retry with FFmpeg defaults.
+      try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
+      await ffmpeg.exec([
+        "-threads", "1",
+        "-i", "meeting.webm",
+        "-movflags", "+faststart",
+        "meeting.mp4"
+      ]);
+    }
+
     const data = await ffmpeg.readFile("meeting.mp4");
-    const mp4Blob = new Blob([data.buffer], { type: "video/mp4" });
+    if (!data || !data.length) throw new Error("FFmpeg produced an empty MP4 file.");
+
+    const mp4Blob = new Blob([data], { type: "video/mp4" });
     const url = URL.createObjectURL(mp4Blob);
     const link = document.createElement("a");
     link.href = url;
@@ -1275,10 +1300,11 @@ async function finishRecording(chunks, sourceType) {
     link.click();
     link.remove();
     setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+
     try { await ffmpeg.deleteFile("meeting.webm"); } catch (error) {}
     try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
   } catch (error) {
-    console.error("Meeting recording conversion failed", error);
+    console.error("Meeting recording conversion failed", error, conversionError);
     const fallbackUrl = URL.createObjectURL(sourceBlob);
     const link = document.createElement("a");
     link.href = fallbackUrl;
@@ -1287,7 +1313,9 @@ async function finishRecording(chunks, sourceType) {
     link.click();
     link.remove();
     setTimeout(function() { URL.revokeObjectURL(fallbackUrl); }, 60000);
-    alert("MP4 conversion failed in this browser, so the recorded meeting was saved as WebM instead.");
+
+    const detail = error && error.message ? " " + error.message : "";
+    alert("MP4 conversion failed." + detail + " The WebM recording was saved instead.");
   } finally {
     cleanupRecording();
     updateRecordingControls();
@@ -1307,6 +1335,9 @@ async function getRecordingFFmpeg() {
   recordingState.ffmpegLoading = true;
   try {
     const ffmpeg = new FFmpeg();
+    ffmpeg.on("log", function(event) {
+      console.debug("[FFmpeg]", event.message);
+    });
     const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
     await ffmpeg.load({
       coreURL: await toBlobURL(baseURL + "/ffmpeg-core.js", "text/javascript"),
