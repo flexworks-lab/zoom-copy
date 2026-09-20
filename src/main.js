@@ -61,6 +61,9 @@ const recordingState = {
   audioContext: null,
   audioDestination: null,
   mediaSources: new Map(),
+  leaveAudio: null,
+  leaveSource: null,
+  leaveGain: null,
   ffmpeg: null,
   ffmpegLoading: false,
   recordingProgress: 0,
@@ -397,13 +400,38 @@ const leaveSound = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
 leaveSound.preload = "auto";
 leaveSound.volume = 0.74;
 
-function playLeaveSound() {
+function setupRecordingLeaveSound() {
+  if (!recordingState.audioContext || !recordingState.audioDestination || recordingState.leaveAudio) return;
+
   try {
-    leaveSound.pause();
-    leaveSound.currentTime = 0;
+    const audio = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
+    audio.preload = "auto";
+    audio.volume = 0.74;
+
+    const source = recordingState.audioContext.createMediaElementSource(audio);
+    const gain = recordingState.audioContext.createGain();
+    gain.gain.value = 1;
+    source.connect(gain);
+    gain.connect(recordingState.audioDestination);
+    gain.connect(recordingState.audioContext.destination);
+
+    recordingState.leaveAudio = audio;
+    recordingState.leaveSource = source;
+    recordingState.leaveGain = gain;
+  } catch (error) {
+    console.warn("Could not attach the leave sound to the recording.", error);
+  }
+}
+
+function playLeaveSound() {
+  const audio = state.recording && recordingState.leaveAudio ? recordingState.leaveAudio : leaveSound;
+
+  try {
+    audio.pause();
+    audio.currentTime = 0;
   } catch (error) {}
 
-  leaveSound.play().catch(function() {});
+  audio.play().catch(function() {});
 }
 
 function leaveMeetingAsMe() {
@@ -1469,13 +1497,12 @@ function drawRecordingFrame() {
   const controlItems = [
     {label: state.micOn ? "Mute" : "Unmute", x: 36, icon: state.micOn ? "mic" : "micOff"},
     {label: state.cameraOn ? "Stop Video" : "Start Video", x: 108, icon: state.cameraOn ? "video" : "videoOff"},
-    {label: "Fake Camera", x: 184, icon: "video"},
-    {label: "Participants " + people.length, x: 274, icon: "users"},
-    {label: "Chat", x: 370, icon: "chat"},
-    {label: state.shareOn ? "Stop Share" : "Share Screen", x: 442, icon: "share"},
+    {label: "Participants " + people.length, x: 202, icon: "users"},
+    {label: "Chat", x: 298, icon: "chat"},
+    {label: state.shareOn ? "Stop Share" : "Share Screen", x: 394, icon: "share"},
     // Keep the recording control visually neutral in the exported video.
-    {label: "Record", x: 552, icon: "record"},
-    {label: "More", x: 670, icon: "more"}
+    {label: "Record", x: 506, icon: "record"},
+    {label: "More", x: 618, icon: "more"}
   ];
 
   controlItems.forEach(function(item) {
@@ -1609,6 +1636,7 @@ async function startRecording() {
     recordingState.audioContext = new AudioContextClass();
     recordingState.audioDestination = recordingState.audioContext.createMediaStreamDestination();
 
+    setupRecordingLeaveSound();
     await syncRecordingAudio();
     try { await recordingState.audioContext.resume(); } catch (error) {}
   }
@@ -1884,6 +1912,20 @@ function cleanupRecording() {
   });
   recordingState.mediaSources.clear();
   recordingAvatarImages.clear();
+
+  if (recordingState.leaveAudio) {
+    try { recordingState.leaveAudio.pause(); } catch (error) {}
+    try { recordingState.leaveAudio.currentTime = 0; } catch (error) {}
+  }
+  if (recordingState.leaveGain) {
+    try { recordingState.leaveGain.disconnect(); } catch (error) {}
+  }
+  if (recordingState.leaveSource) {
+    try { recordingState.leaveSource.disconnect(); } catch (error) {}
+  }
+  recordingState.leaveAudio = null;
+  recordingState.leaveGain = null;
+  recordingState.leaveSource = null;
 
   if (recordingState.audioContext) {
     try { recordingState.audioContext.close(); } catch (error) {}
