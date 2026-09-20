@@ -86,7 +86,9 @@ function renderSettings() {
 }
 
 function participantTile(person) {
-  const media = person.videoUrl
+  const isMe = person.id === "me";
+  const showVideo = person.videoUrl && (!isMe || state.cameraOn);
+  const media = showVideo
     ? '<video class="participant-video" src="' + person.videoUrl + '" autoplay muted loop playsinline></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '"><span>' + person.initials + '</span></div>';
   return '<article class="participant-tile">' + media + '<div class="tile-scrim"></div><div class="participant-label"><span class="status-dot"></span><span>' + person.name + '</span>' + (person.role ? '<em>' + person.role + '</em>' : "") + '</div><div class="tile-menu">' + icon("more") + '</div></article>';
