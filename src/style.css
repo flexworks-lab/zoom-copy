@@ -82,3 +82,13 @@ button{border:0;cursor:pointer}
 .camera-hidden-badge{position:absolute;top:9px;left:50%;transform:translateX(-50%);padding:5px 8px;border-radius:6px;background:rgba(220,62,72,.84);color:#fff;font-size:8px;font-weight:900;letter-spacing:.06em;z-index:2}
 .edit-camera-action{margin-top:12px}
 .edit-camera-action .secondary{width:100%;border:1px solid #dfe5eb;background:#f8fafc}
+
+.next-key-badge{position:absolute;left:8px;top:36px;padding:4px 7px;border-radius:6px;background:rgba(22,90,155,.72);color:#fff;font-size:8px;font-weight:800;letter-spacing:.04em;backdrop-filter:blur(5px)}
+.video-playlist{margin-top:9px;border:1px solid #e4e9ef;border-radius:10px;max-height:150px;overflow:auto;background:#f8fafc}
+.video-playlist-row{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:7px;padding:8px 9px;border-bottom:1px solid #e9edf1;font-size:10px}
+.video-playlist-row:last-child{border-bottom:0}
+.video-playlist-row>span{width:22px;height:22px;border-radius:6px;background:#e8f2ff;color:#2d7edc;display:grid;place-items:center;font-weight:800}
+.video-playlist-row strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.video-playlist-row em{font-size:8px;color:#2d8cff;font-style:normal;font-weight:800}
+.editor-actions-row{display:flex;align-items:center;gap:10px;margin-top:14px}
+.editor-actions-row .check-row{margin-top:0;flex:1}
