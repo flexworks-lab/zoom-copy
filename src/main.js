@@ -88,6 +88,11 @@ const icons = {
   stop: '<rect x="7" y="7" width="10" height="10" rx="2"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .3 2l.1.1-1.9 1.9-.1-.1a1.8 1.8 0 0 0-2-.3 1.8 1.8 0 0 0-1.1 1.7V20h-2.7v-.2a1.8 1.8 0 0 0-1.1-1.7 1.8 1.8 0 0 0-2 .3l-.1.1-1.9-1.9.1-.1a1.8 1.8 0 0 0 .3-2 1.8 1.8 0 0 0-1.7-1.1H5.5v-2.7h.2a1.8 1.8 0 0 0 1.7-1.1 1.8 1.8 0 0 0-.3-2L7 7.4l1.9-1.9.1.1a1.8 1.8 0 0 0 2 .3A1.8 1.8 0 0 0 12 4.2V4h2.7v.2a1.8 1.8 0 0 0 1.1 1.7 1.8 1.8 0 0 0 2-.3l.1-.1 1.9 1.9-.1.1a1.8 1.8 0 0 0-.3 2 1.8 1.8 0 0 0 1.7 1.1h.2v2.7h-.2a1.8 1.8 0 0 0-1.7 1.1Z"/>',
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.6 19.6 0 0 1-8.5-3 19.3 19.3 0 0 1-5.9-5.9 19.6 19.6 0 0 1-3-8.6A2 2 0 0 1 4.4 2.2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.4 10a16 16 0 0 0 5.8 5.8l1.1-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2.1Z"/>',
+  restart: '<path d="M4 7v5h5"/><path d="M20 17v-5h-5"/><path d="M5.4 12a7 7 0 0 1 11.7-5L20 10"/><path d="M18.6 12a7 7 0 0 1-11.7 5L4 14"/>',
+  pause: '<rect x="7" y="5" width="3" height="14" rx="1"/><rect x="14" y="5" width="3" height="14" rx="1"/>',
+  play: '<path d="m8 5 11 7-11 7Z"/>',
+  home: '<path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>'
+};
   home: '<path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>'
 };
 
@@ -696,6 +701,56 @@ function renderSettings() {
   return shell(content, "settings");
 }
 
+function updateClipControlLabels(personId) {
+  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
+  if (!tile) return;
+  const video = tile.querySelector("video.participant-video");
+  tile.querySelectorAll('[data-action="toggle-clip"][data-person-id="' + personId + '"]').forEach(function(button) {
+    const paused = !video || video.paused;
+    button.innerHTML = icon(paused ? "play" : "pause") + '<span>' + (paused ? "Play clip" : "Pause clip") + '</span>';
+  });
+}
+
+function restartPersonClip(personId) {
+  const person = getParticipant(personId);
+  if (!person || !getCurrentVideoUrl(person)) return false;
+
+  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
+  const video = tile && tile.querySelector("video.participant-video");
+  if (!video) return false;
+
+  const start = function() {
+    try {
+      video.currentTime = 0;
+    } catch (error) {}
+    video.play().catch(function() {});
+    updateClipControlLabels(personId);
+    syncAudioIndicator();
+  };
+
+  if (video.readyState >= 1) start();
+  else video.addEventListener("loadedmetadata", start, { once: true });
+  return true;
+}
+
+function togglePersonClip(personId) {
+  const person = getParticipant(personId);
+  if (!person || !getCurrentVideoUrl(person)) return false;
+
+  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
+  const video = tile && tile.querySelector("video.participant-video");
+  if (!video) return false;
+
+  if (video.paused || video.ended) {
+    video.play().catch(function() {});
+  } else {
+    video.pause();
+  }
+  updateClipControlLabels(personId);
+  syncAudioIndicator();
+  return true;
+}
+
 function participantTile(person) {
   const videoUrl = getCurrentVideoUrl(person);
   const videoCount = getVideos(person).length;
@@ -720,6 +775,10 @@ function participantTile(person) {
   return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + keybindBadges + hiddenBadge + mutedBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
     (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' +
+    (videoCount ? '<div class="clip-controls">' +
+      '<button class="clip-control" data-action="restart-clip" data-person-id="' + person.id + '" title="Restart clip">' + icon("restart") + '<span>Restart</span></button>' +
+      '<button class="clip-control" data-action="toggle-clip" data-person-id="' + person.id + '" title="Pause clip">' + icon("pause") + '<span>Pause clip</span></button>' +
+    '</div>' : '') +
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
 }
 
@@ -1121,9 +1180,18 @@ function wireParticipantVideo(video) {
     handleVideoEnded(video.dataset.personId);
     syncAudioIndicator();
   });
-  video.addEventListener("play", syncAudioIndicator);
-  video.addEventListener("playing", syncAudioIndicator);
-  video.addEventListener("pause", syncAudioIndicator);
+  video.addEventListener("play", function() {
+    syncAudioIndicator();
+    updateClipControlLabels(video.dataset.personId);
+  });
+  video.addEventListener("playing", function() {
+    syncAudioIndicator();
+    updateClipControlLabels(video.dataset.personId);
+  });
+  video.addEventListener("pause", function() {
+    syncAudioIndicator();
+    updateClipControlLabels(video.dataset.personId);
+  });
   video.addEventListener("volumechange", syncAudioIndicator);
   video.play().then(syncAudioIndicator).catch(syncAudioIndicator);
 }
@@ -1446,7 +1514,7 @@ function drawRecordingFrame() {
     ctx.clip();
 
     const video = document.querySelector('video.participant-video[data-person-id="' + person.id + '"]');
-    if (video && video.readyState >= 2 && !video.paused && !video.ended && video.videoWidth && video.videoHeight) {
+    if (video && video.readyState >= 2 && !video.ended && video.videoWidth && video.videoHeight) {
       const sourceRatio = video.videoWidth / video.videoHeight;
       const tileRatio = tileWidth / tileHeight;
       let drawWidth = tileWidth;
@@ -2182,6 +2250,8 @@ function bind() {
       }
       if (a === "add-person") { openAddPerson(); return; }
       if (a === "edit-person") { openParticipantEditor(el.dataset.personId); return; }
+      if (a === "restart-clip") { restartPersonClip(el.dataset.personId); return; }
+      if (a === "toggle-clip") { togglePersonClip(el.dataset.personId); return; }
       if (a === "leave-person") { leavePerson(el.dataset.personId); return; }
       if (a === "add-video") { openFakeCameraPicker(); return; }
       if (a === "toggle-person-audio") {
