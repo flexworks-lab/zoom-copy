@@ -592,9 +592,18 @@ function participantTile(person) {
     ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '" autoplay playsinline' +
       (state.audioEnabled && isPersonAudioOn(person) ? "" : " muted") + '></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '">' + avatarMarkup(person, "participant-avatar-image") + '<span' + (getAvatarUrl(person) ? ' class="participant-avatar-initials"' : '') + '>' + escapeHtml(person.initials) + '</span></div>';
+
+  const cameraKey = state.keybinds[person.id] || "—";
+  const nextKey = state.nextKeybinds[person.id] || "—";
+  const audioKey = state.audioKeybinds[person.id] || "—";
+  const keybindBadges =
+    '<span class="keybind-badge">Cam:' + escapeHtml(cameraKey.toUpperCase()) + '</span>' +
+    '<span class="next-key-badge">Next:' + escapeHtml(nextKey.toUpperCase()) + '</span>' +
+    '<span class="audio-key-badge">Audio:' + escapeHtml(audioKey.toUpperCase()) + '</span>';
+
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
-  return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge + mutedBadge +
+  return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + keybindBadges + hiddenBadge + mutedBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
     (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' +
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
@@ -1054,30 +1063,22 @@ function drawRecordingAvatar(ctx, person, x, y, w, h) {
 
   const avatarImage = getRecordingAvatarImage(person);
   if (avatarImage) {
-    const imageRatio = avatarImage.naturalWidth / avatarImage.naturalHeight;
-    const tileRatio = w / h;
-    let drawWidth = w;
-    let drawHeight = h;
-    let drawX = x;
-    let drawY = y;
-
-    if (imageRatio > tileRatio) {
-      drawWidth = h * imageRatio;
-      drawX = x + (w - drawWidth) / 2;
-    } else {
-      drawHeight = w / imageRatio;
-      drawY = y + (h - drawHeight) / 2;
-    }
+    const diameter = Math.max(48, Math.min(76, Math.min(w, h) * 0.22));
+    const cx = x + w / 2;
+    const cy = y + h / 2;
 
     ctx.save();
-    roundedRectPath(ctx, x, y, w, h, 10);
+    ctx.beginPath();
+    ctx.arc(cx, cy, diameter / 2, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(avatarImage, drawX, drawY, drawWidth, drawHeight);
+    ctx.drawImage(avatarImage, cx - diameter / 2, cy - diameter / 2, diameter, diameter);
     ctx.restore();
 
-    // Keep the same dark lower gradient used behind video tiles.
-    ctx.fillStyle = "rgba(0,0,0,.16)";
-    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = "rgba(255,255,255,.92)";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, diameter / 2, 0, Math.PI * 2);
+    ctx.stroke();
   } else {
     ctx.fillStyle = "#ffffff";
     ctx.font = "800 " + Math.max(28, Math.min(w, h) * 0.15) + "px system-ui, sans-serif";
