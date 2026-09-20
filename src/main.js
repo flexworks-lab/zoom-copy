@@ -1500,6 +1500,56 @@ function openAddPerson() {
   openParticipantEditor(null);
 }
 
+function renderVideoPlaylist(person) {
+  const videos = getVideos(person);
+  const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
+  if (!videos.length) return "";
+
+  return videos.map(function(v, i) {
+    const isFirst = i === 0;
+    const isLast = i === videos.length - 1;
+    return '<div class="video-playlist-row">' +
+      '<span class="video-playlist-number">' + (i + 1) + '</span>' +
+      '<strong>' + escapeHtml(v.name || ("Video " + (i + 1))) + '</strong>' +
+      (i === currentIndex ? '<em>Now playing</em>' : '') +
+      '<div class="video-order-actions">' +
+        '<button type="button" class="video-order-button" data-move-video="up" data-video-index="' + i + '"' + (isFirst ? ' disabled' : '') + ' aria-label="Move video up">↑</button>' +
+        '<button type="button" class="video-order-button" data-move-video="down" data-video-index="' + i + '"' + (isLast ? ' disabled' : '') + ' aria-label="Move video down">↓</button>' +
+      '</div>' +
+    '</div>';
+  }).join("");
+}
+
+function reorderParticipantVideo(personId, fromIndex, direction) {
+  const person = getParticipant(personId);
+  if (!person) return false;
+
+  const videos = person.id === "me" ? state.myVideos : person.videos;
+  if (!Array.isArray(videos) || videos.length < 2) return false;
+
+  const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
+  if (fromIndex < 0 || fromIndex >= videos.length || toIndex < 0 || toIndex >= videos.length) return false;
+
+  const movedVideo = videos[fromIndex];
+  videos[fromIndex] = videos[toIndex];
+  videos[toIndex] = movedVideo;
+
+  const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
+  if (currentIndex === fromIndex) {
+    if (person.id === "me") state.myVideoIndex = toIndex;
+    else person.currentVideoIndex = toIndex;
+  } else if (fromIndex < currentIndex && currentIndex <= toIndex) {
+    if (person.id === "me") state.myVideoIndex = currentIndex - 1;
+    else person.currentVideoIndex = currentIndex - 1;
+  } else if (toIndex <= currentIndex && currentIndex < fromIndex) {
+    if (person.id === "me") state.myVideoIndex = currentIndex + 1;
+    else person.currentVideoIndex = currentIndex + 1;
+  }
+
+  queueMeetingSave();
+  return true;
+}
+
 function openParticipantEditor(personId) {
   const isNew = personId === null;
   const isMe = personId === "me";
@@ -1534,7 +1584,7 @@ function openParticipantEditor(personId) {
       (!isNew && getAvatarUrl(person) ? '<label class="check-row"><input name="clearAvatar" type="checkbox"><span>Remove profile picture</span></label>' : '') +
       '<label class="field-label">Add video files<input name="video" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" multiple></label>' +
       '<div class="file-help">' + (videos.length ? videos.length + " video" + (videos.length === 1 ? "" : "s") + " currently assigned. New files are added." : "Select multiple MP4 or phone videos at once.") + '</div>' +
-      (videos.length ? '<div class="video-playlist">' + videos.map(function(v, i) { return '<div class="video-playlist-row"><span>' + (i + 1) + '</span><strong>' + escapeHtml(v.name || ("Video " + (i + 1))) + '</strong>' + (i === currentIndex ? '<em>Now playing</em>' : '') + '</div>'; }).join("") + '</div>' : '') +
+      (videos.length ? '<div class="video-playlist-help">Imported order is used by Next. Use ↑ and ↓ to change the order.</div><div class="video-playlist">' + renderVideoPlaylist(person) + '</div>' : '') +
       '<label class="field-label">Camera keybind<input name="keybind" class="keybind-input" value="' + escapeHtml(currentKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
       '<div class="file-help">Show or hide this person’s camera.</div>' +
       '<label class="field-label">Next video keybind<input name="nextKeybind" class="keybind-input" value="' + escapeHtml(currentNextKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
@@ -1775,6 +1825,25 @@ function openParticipantEditor(personId) {
       saving = false;
     }
   });
+
+  function wireVideoOrderButtons() {
+    modal.querySelectorAll("[data-move-video]").forEach(function(button) {
+      button.addEventListener("click", function handleMoveClick() {
+        const fromIndex = Number(button.dataset.videoIndex);
+        const direction = button.dataset.moveVideo;
+        if (!Number.isInteger(fromIndex)) return;
+        if (!reorderParticipantVideo(personId, fromIndex, direction)) return;
+
+        const playlist = modal.querySelector(".video-playlist");
+        const updatedPerson = getParticipant(personId);
+        if (playlist && updatedPerson) {
+          playlist.innerHTML = renderVideoPlaylist(updatedPerson);
+          wireVideoOrderButtons();
+        }
+      });
+    });
+  }
+  wireVideoOrderButtons();
 
   const nameInput = form.querySelector('[name="name"]');
   nameInput.focus();
