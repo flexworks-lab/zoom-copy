@@ -390,8 +390,12 @@ function leavePerson(personId) {
   delete state.leaveKeybinds[personId];
   normalizeHosts();
   playLeaveSound();
+
+  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
+  if (tile) tile.remove();
+
   updateParticipantsListOnly();
-  updateParticipantTile(personId);
+  syncAudioIndicator();
   if (state.recording) syncRecordingAudio();
   return true;
 }
