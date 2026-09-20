@@ -36,7 +36,7 @@ const state = {
   nextKeybinds: {},
   audioKeybinds: {},
   myAudioOn: true,
-  audioEnabled: false
+  audioEnabled: true
 };
 
 const icons = {
@@ -384,8 +384,9 @@ function participantTile(person) {
   const keyBadge = keybind ? '<span class="keybind-badge">Cam ' + escapeHtml(keybind.toUpperCase()) + '</span>' : "";
   const nextBadge = nextKey ? '<span class="next-key-badge">Next ' + escapeHtml(nextKey.toUpperCase()) + '</span>' : "";
   const audioBadge = audioKey ? '<span class="audio-key-badge">Audio ' + escapeHtml(audioKey.toUpperCase()) + '</span>' : "";
+  const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
-  return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge +
+  return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge + mutedBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
     (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' + keyBadge + nextBadge + audioBadge +
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
@@ -515,7 +516,7 @@ function renderParticipants() {
       const nextText = state.nextKeybinds[p.id] ? " · Next " + state.nextKeybinds[p.id].toUpperCase() : "";
       const audioText = state.audioKeybinds[p.id] ? " · Audio " + state.audioKeybinds[p.id].toUpperCase() : "";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
-      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + keyText + nextText + audioText + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon("mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + audioText + (p.audioOn === false ? " · Muted" : "") + keyText + nextText + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
