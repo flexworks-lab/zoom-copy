@@ -141,6 +141,7 @@ function advancePersonVideo(personId) {
   person.cameraVisible = true;
   updateParticipantTile(personId);
   updateParticipantsListOnly();
+}
 
 function setPersonKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
