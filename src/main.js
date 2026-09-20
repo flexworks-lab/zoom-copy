@@ -39,6 +39,7 @@ const state = {
   nextKeybinds: {},
   audioKeybinds: {},
   leaveKeybinds: {},
+  leaveHistory: [],
   myAudioOn: true,
   audioEnabled: true,
   audioPlaying: false,
@@ -373,7 +374,7 @@ function handleVideoEnded(personId) {
 function setPersonKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.keybinds[personId];
-  if (!/^[a-z0-9]$/i.test(normalized)) return;
+  if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
   Object.keys(state.keybinds).forEach(function(id) {
     if (id !== personId && state.keybinds[id] === normalized) delete state.keybinds[id];
   });
@@ -383,7 +384,7 @@ function setPersonKeybind(personId, key) {
 function setNextKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.nextKeybinds[personId];
-  if (!/^[a-z0-9]$/i.test(normalized)) return;
+  if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
   Object.keys(state.nextKeybinds).forEach(function(id) {
     if (id !== personId && state.nextKeybinds[id] === normalized) delete state.nextKeybinds[id];
   });
@@ -393,7 +394,7 @@ function setNextKeybind(personId, key) {
 function setLeaveKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.leaveKeybinds[personId];
-  if (!/^[a-z0-9]$/i.test(normalized)) return;
+  if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
   Object.keys(state.leaveKeybinds).forEach(function(id) {
     if (id !== personId && state.leaveKeybinds[id] === normalized) delete state.leaveKeybinds[id];
   });
@@ -441,6 +442,28 @@ function playLeaveSound() {
 function leaveMeetingAsMe() {
   if (state.myParticipantHidden) return false;
 
+  state.leaveHistory.push({
+    type: "me",
+    displayName: state.displayName,
+    myVideos: state.myVideos,
+    myVideoIndex: state.myVideoIndex,
+    myAutoPlayNext: state.myAutoPlayNext,
+    myAutoCameraOff: state.myAutoCameraOff,
+    myAudioOn: state.myAudioOn,
+    myParticipantHidden: state.myParticipantHidden,
+    cameraHiddenMe: state.cameraHidden.me,
+    cameraOn: state.cameraOn,
+    needsNextOnCamera: state.needsNextOnCamera,
+    myAvatarUrl: state.myAvatarUrl,
+    keybinds: {
+      camera: state.keybinds.me || "",
+      next: state.nextKeybinds.me || "",
+      audio: state.audioKeybinds.me || "",
+      leave: state.leaveKeybinds.me || ""
+    }
+  });
+  if (state.leaveHistory.length > 50) state.leaveHistory.shift();
+
   playLeaveSound();
   state.myParticipantHidden = true;
 
@@ -462,8 +485,21 @@ function leavePerson(personId) {
   playLeaveSound();
 
   const person = state.fakePeople[index];
-  revokeVideos(person.videos);
-  revokeBlob(person.avatarUrl);
+  state.leaveHistory.push({
+    type: "fake",
+    person: person,
+    hostIdBeforeLeave: state.hostId,
+    keybinds: {
+      camera: state.keybinds[personId] || "",
+      next: state.nextKeybinds[personId] || "",
+      audio: state.audioKeybinds[personId] || "",
+      leave: state.leaveKeybinds[personId] || ""
+    }
+  });
+  if (state.leaveHistory.length > 50) state.leaveHistory.shift();
+
+  // Keep the participant's local blob URLs alive so undo can restore the
+  // exact same videos/profile picture.
   state.fakePeople.splice(index, 1);
   delete state.keybinds[personId];
   delete state.nextKeybinds[personId];
@@ -476,6 +512,50 @@ function leavePerson(personId) {
 
   updateParticipantsListOnly();
   syncAudioIndicator();
+  if (state.recording) syncRecordingAudio();
+  return true;
+}
+
+function undoLastLeave() {
+  const snapshot = state.leaveHistory.pop();
+  if (!snapshot) return false;
+
+  if (snapshot.type === "me") {
+    state.displayName = snapshot.displayName;
+    state.myVideos = snapshot.myVideos || [];
+    state.myVideoIndex = snapshot.myVideoIndex || 0;
+    state.myAutoPlayNext = snapshot.myAutoPlayNext;
+    state.myAutoCameraOff = snapshot.myAutoCameraOff;
+    state.myAudioOn = snapshot.myAudioOn;
+    state.myParticipantHidden = snapshot.myParticipantHidden;
+    state.cameraHidden.me = snapshot.cameraHiddenMe;
+    state.cameraOn = snapshot.cameraOn;
+    state.needsNextOnCamera = snapshot.needsNextOnCamera;
+    state.myAvatarUrl = snapshot.myAvatarUrl;
+
+    setPersonKeybind("me", snapshot.keybinds.camera);
+    setNextKeybind("me", snapshot.keybinds.next);
+    setAudioKeybind("me", snapshot.keybinds.audio);
+    setLeaveKeybind("me", snapshot.keybinds.leave);
+  } else if (snapshot.type === "fake" && snapshot.person) {
+    if (!state.fakePeople.some(function(p) { return p.id === snapshot.person.id; })) {
+      state.fakePeople.push(snapshot.person);
+    }
+
+    if (state.fakePeople.some(function(p) { return p.id === snapshot.person.id; })) {
+      setPersonKeybind(snapshot.person.id, snapshot.keybinds.camera);
+      setNextKeybind(snapshot.person.id, snapshot.keybinds.next);
+      setAudioKeybind(snapshot.person.id, snapshot.keybinds.audio);
+      setLeaveKeybind(snapshot.person.id, snapshot.keybinds.leave);
+    }
+
+    if (snapshot.hostIdBeforeLeave === snapshot.person.id) {
+      state.hostId = snapshot.person.id;
+    }
+    normalizeHosts();
+  }
+
+  render();
   if (state.recording) syncRecordingAudio();
   return true;
 }
@@ -762,6 +842,7 @@ function renderParticipants() {
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
     '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>Participant</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
+    '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div>' +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
     '<div class="participant-list">' +
     state.fakePeople.filter(function(p){ return !state.participantSearch || p.name.toLowerCase().includes(state.participantSearch.toLowerCase()); }).map(function(p){
@@ -825,7 +906,8 @@ function openParticipantEditor(personId) {
       '<div class="file-help">Off: the camera stays on the last video frame. On: the camera turns off when the video ends.</div>' +
       '<label class="check-row autoplay-row"><input name="autoCameraOff" type="checkbox" ' + (autoCameraOff ? "checked" : "") + '><span>Turn camera off when video ends</span></label>' +
       '<div class="file-help">Disable this to keep the camera tile visible after a video finishes.</div>' +
-      (!isNew ? '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label><div class="file-help">This person leaves the meeting when the key is pressed.</div>' : '') +
+      '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
+      '<div class="file-help">This person leaves the meeting when the key is pressed. Press 0 to undo the last leave.</div>' +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
       (!isNew && videos.length > 1 ? '<button type="button" class="secondary" data-next-video>Play next now</button>' : '') +
       '</div>' +
@@ -897,7 +979,7 @@ function openParticipantEditor(personId) {
         input.value = "";
         return;
       }
-      if (/^[a-z0-9]$/i.test(e.key)) input.value = e.key.toUpperCase();
+      if (/^[a-z0-9]$/i.test(e.key) && e.key !== "0") input.value = e.key.toUpperCase();
     });
     input.addEventListener("focus", function() { input.select(); });
   });
@@ -2109,6 +2191,12 @@ window.addEventListener("keydown", function(e) {
   if (tag === "INPUT" || tag === "TEXTAREA" || e.isComposing) return;
   const key = String(e.key || "").toLowerCase();
   if (!/^[a-z0-9]$/.test(key)) return;
+
+  if (key === "0") {
+    e.preventDefault();
+    undoLastLeave();
+    return;
+  }
 
   const cameraPersonId = Object.keys(state.keybinds).find(function(id) {
     return state.keybinds[id] === key;
