@@ -781,6 +781,7 @@ async function buildSavedMeetingState() {
   return {
     record: {
       id: MEETING_RECORD_ID,
+      accountId: state.account && state.account.id || null,
       version: 1,
       savedAt: Date.now(),
       state: saved,
@@ -796,10 +797,13 @@ async function buildSavedMeetingState() {
 }
 
 function putMeetingRecord(record) {
+  const normalized = Object.assign({}, record, {
+    accountId: record && record.accountId || state.account && state.account.id || null
+  });
   return openMeetingDb().then(function(db) {
     return new Promise(function(resolve, reject) {
       const tx = db.transaction("meetings", "readwrite");
-      tx.objectStore("meetings").put(record);
+      tx.objectStore("meetings").put(normalized);
       tx.oncomplete = function() { resolve(); };
       tx.onerror = function() { reject(tx.error || new Error("Could not save the meeting.")); };
       tx.onabort = function() { reject(tx.error || new Error("Meeting save was aborted.")); };
