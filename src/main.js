@@ -3002,21 +3002,6 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  if (state.pauseAllKeybind && state.pauseAllKeybind === key) {
-    e.preventDefault();
-    pauseAllVideos();
-    return;
-  }
-
-  const restartPersonId = Object.keys(state.restartKeybinds || {}).find(function(id) {
-    return state.restartKeybinds[id] === key;
-  });
-  if (restartPersonId) {
-    e.preventDefault();
-    restartPersonClip(restartPersonId);
-    return;
-  }
-
   const pausePersonId = Object.keys(state.pauseKeybinds || {}).find(function(id) {
     return state.pauseKeybinds[id] === key;
   });
