@@ -177,11 +177,49 @@ function addVideoFiles(target, files) {
   }
 }
 
+function captureVideoState() {
+  const snapshot = {};
+  document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
+    const personId = video.dataset.personId;
+    snapshot[personId] = {
+      src: video.currentSrc || video.src,
+      currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+      wasPaused: video.paused
+    };
+  });
+  return snapshot;
+}
+
+function restoreVideoState(snapshot) {
+  document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
+    const saved = snapshot[video.dataset.personId];
+    if (!saved) return;
+
+    const restore = function() {
+      if ((video.currentSrc || video.src) !== saved.src) return;
+      try {
+        if (Number.isFinite(saved.currentTime) && saved.currentTime > 0) {
+          video.currentTime = Math.min(saved.currentTime, Math.max(0, (video.duration || saved.currentTime) - 0.05));
+        }
+      } catch (error) {}
+
+      if (!saved.wasPaused) {
+        video.play().catch(function(){});
+      }
+    };
+
+    if (video.readyState >= 1) restore();
+    else video.addEventListener("loadedmetadata", restore, { once: true });
+  });
+}
+
 function render() {
+  const videoState = state.page === "meeting" ? captureVideoState() : {};
   if (state.page === "meeting") app.innerHTML = renderMeeting();
   else if (state.page === "settings") app.innerHTML = renderSettings();
   else app.innerHTML = renderHome();
   bind();
+  if (state.page === "meeting") restoreVideoState(videoState);
 }
 
 function shell(content, active) {
@@ -227,11 +265,14 @@ function renderSettings() {
 
 function participantTile(person) {
   const videoUrl = getCurrentVideoUrl(person);
+  const videoCount = getVideos(person).length;
   const showVideo = Boolean(videoUrl && isCameraVisible(person));
   const keybind = state.keybinds[person.id];
   const nextKey = state.nextKeybinds[person.id];
   const media = showVideo
-    ? '<video class="participant-video" src="' + videoUrl + '" autoplay loop playsinline' + (state.audioEnabled ? "" : " muted") + '></video>'
+    ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '" autoplay playsinline' +
+      (videoCount === 1 ? " loop" : "") +
+      (state.audioEnabled ? "" : " muted") + '></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '"><span>' + escapeHtml(person.initials) + '</span></div>';
   const keyBadge = keybind ? '<span class="keybind-badge">Cam ' + escapeHtml(keybind.toUpperCase()) + '</span>' : "";
   const nextBadge = nextKey ? '<span class="next-key-badge">Next ' + escapeHtml(nextKey.toUpperCase()) + '</span>' : "";
@@ -542,6 +583,15 @@ function bind() {
   });
   document.querySelectorAll("video.participant-video").forEach(function(v){
     v.volume = 1;
+    v.addEventListener("ended", function() {
+      const personId = v.dataset.personId;
+      const person = getParticipant(personId);
+      if (!person) return;
+      if (getVideos(person).length > 1) {
+        advancePersonVideo(personId);
+        render();
+      }
+    });
     v.play().catch(function(){});
   });
 }
