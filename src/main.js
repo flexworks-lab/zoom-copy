@@ -400,21 +400,15 @@ function participantTile(person) {
   const videoUrl = getCurrentVideoUrl(person);
   const videoCount = getVideos(person).length;
   const showVideo = Boolean(videoUrl && isCameraVisible(person));
-  const keybind = state.keybinds[person.id];
-  const nextKey = state.nextKeybinds[person.id];
-  const audioKey = state.audioKeybinds[person.id];
   const media = showVideo
     ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '" autoplay playsinline' +
       (state.audioEnabled && isPersonAudioOn(person) ? "" : " muted") + '></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '"><span>' + escapeHtml(person.initials) + '</span></div>';
-  const keyBadge = keybind ? '<span class="keybind-badge">Cam ' + escapeHtml(keybind.toUpperCase()) + '</span>' : "";
-  const nextBadge = nextKey ? '<span class="next-key-badge">Next ' + escapeHtml(nextKey.toUpperCase()) + '</span>' : "";
-  const audioBadge = audioKey ? '<span class="audio-key-badge">Audio ' + escapeHtml(audioKey.toUpperCase()) + '</span>' : "";
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
   return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge + mutedBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
-    (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' + keyBadge + nextBadge + audioBadge +
+    (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' +
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
 }
 
@@ -539,11 +533,8 @@ function renderParticipants() {
     state.fakePeople.map(function(p){
       const videos = getVideos(p);
       const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
-      const keyText = state.keybinds[p.id] ? " · Cam " + state.keybinds[p.id].toUpperCase() : "";
-      const nextText = state.nextKeybinds[p.id] ? " · Next " + state.nextKeybinds[p.id].toUpperCase() : "";
-      const audioText = state.audioKeybinds[p.id] ? " · Audio " + state.audioKeybinds[p.id].toUpperCase() : "";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
-      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + audioText + (p.audioOn === false ? " · Muted" : "") + keyText + nextText + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
