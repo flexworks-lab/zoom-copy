@@ -949,11 +949,25 @@ function undoLastLeave() {
 }
 
 function joinBackParticipant(personId) {
+  if (personId === "me") {
+    // Your participant data remains in state after leaving. Joining back only
+    // needs to make the existing participant visible again, so it also works
+    // after a tab reload where leaveHistory is intentionally not persisted.
+    state.myParticipantHidden = false;
+    if (!state.cameraHidden) state.cameraHidden = {};
+    normalizeHosts();
+
+    render();
+    if (state.recording) syncRecordingAudio();
+    queueMeetingSave();
+    return true;
+  }
+
   let snapshotIndex = -1;
 
   for (let i = state.leaveHistory.length - 1; i >= 0; i -= 1) {
-    if (state.leaveHistory[i] && state.leaveHistory[i].type === (personId === "me" ? "me" : "fake")) {
-      if (personId === "me" || state.leaveHistory[i].person?.id === personId) {
+    if (state.leaveHistory[i] && state.leaveHistory[i].type === "fake") {
+      if (state.leaveHistory[i].person?.id === personId) {
         snapshotIndex = i;
         break;
       }
@@ -963,49 +977,28 @@ function joinBackParticipant(personId) {
   if (snapshotIndex < 0) return false;
 
   const snapshot = state.leaveHistory.splice(snapshotIndex, 1)[0];
-  if (snapshot.type === "me") {
-    state.displayName = snapshot.displayName;
-    state.myVideos = snapshot.myVideos || [];
-    state.myVideoIndex = snapshot.myVideoIndex || 0;
-    state.myAutoPlayNext = snapshot.myAutoPlayNext;
-    state.myAutoCameraOff = snapshot.myAutoCameraOff;
-    state.myAudioOn = snapshot.myAudioOn;
-    state.myParticipantHidden = false;
-    state.cameraHidden.me = snapshot.cameraHiddenMe;
-    state.cameraOn = snapshot.cameraOn;
-    state.needsNextOnCamera = snapshot.needsNextOnCamera;
-    state.myAvatarUrl = snapshot.myAvatarUrl;
+  const person = snapshot.person;
+  if (!person) return false;
 
-    const keys = snapshot.keybinds || {};
-    setPersonKeybind("me", keys.camera);
-    setNextKeybind("me", keys.next);
-    setAudioKeybind("me", keys.audio);
-    setLeaveKeybind("me", keys.leave);
-  } else {
-    const person = snapshot.person;
-    if (!person) return false;
-
-    if (!state.fakePeople.some(function(p) { return p.id === person.id; })) {
-      state.fakePeople.push(person);
-    }
-
-    setPersonKeybind(person.id, snapshot.keybinds?.camera);
-    setNextKeybind(person.id, snapshot.keybinds?.next);
-    setAudioKeybind(person.id, snapshot.keybinds?.audio);
-    setLeaveKeybind(person.id, snapshot.keybinds?.leave);
-
-    if (snapshot.hostIdBeforeLeave === person.id) {
-      state.hostId = person.id;
-    }
-    normalizeHosts();
+  if (!state.fakePeople.some(function(p) { return p.id === person.id; })) {
+    state.fakePeople.push(person);
   }
+
+  setPersonKeybind(person.id, snapshot.keybinds?.camera);
+  setNextKeybind(person.id, snapshot.keybinds?.next);
+  setAudioKeybind(person.id, snapshot.keybinds?.audio);
+  setLeaveKeybind(person.id, snapshot.keybinds?.leave);
+
+  if (snapshot.hostIdBeforeLeave === person.id) {
+    state.hostId = person.id;
+  }
+  normalizeHosts();
 
   render();
   if (state.recording) syncRecordingAudio();
   queueMeetingSave();
   return true;
 }
-
 function setAudioKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.audioKeybinds[personId];
