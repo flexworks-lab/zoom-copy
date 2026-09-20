@@ -36,7 +36,8 @@ const state = {
   nextKeybinds: {},
   audioKeybinds: {},
   myAudioOn: true,
-  audioEnabled: true
+  audioEnabled: true,
+  audioPlaying: false
 };
 
 const icons = {
@@ -144,16 +145,20 @@ function advancePersonVideo(personId) {
   const videos = getVideos(person);
   if (videos.length < 2) return false;
 
+  const wasVisible = isCameraVisible(person);
+
   if (personId === "me") {
     state.myVideoIndex = (state.myVideoIndex + 1) % videos.length;
-    state.cameraHidden.me = false;
-    state.cameraOn = true;
+    if (wasVisible) {
+      state.cameraHidden.me = false;
+      state.cameraOn = true;
+    }
     state.needsNextOnCamera = false;
   } else {
     const target = state.fakePeople.find(function(p) { return p.id === personId; });
     if (!target) return false;
     target.currentVideoIndex = ((target.currentVideoIndex || 0) + 1) % target.videos.length;
-    target.cameraVisible = true;
+    if (wasVisible) target.cameraVisible = true;
     target.needsNextOnCamera = false;
   }
 
@@ -491,7 +496,7 @@ function renderMeeting() {
         '<button class="control-btn" data-action="add-video">' + icon("video") + '<span>Fake Camera</span></button>' +
       '</div>' +
       '<div class="controls-center">' +
-        '<button class="control-btn ' + (state.participantsOpen ? "selected" : "") + '" data-action="toggle-participants">' + icon("users") + '<span>Participants <b>' + allPeople.length + '</b></span></button>' +
+        '<button class="control-btn ' + (state.participantsOpen ? "selected " : "") + (state.audioPlaying ? "audio-playing" : "") + '" data-action="toggle-participants">' + icon("users") + '<span>Participants <b>' + allPeople.length + '</b></span></button>' +
         '<button class="control-btn ' + (state.chatOpen ? "selected" : "") + '" data-action="toggle-chat">' + icon("chat") + '<span>Chat</span></button>' +
         '<button class="control-btn ' + (state.shareOn ? "selected share" : "") + '" data-action="toggle-share">' + icon("share") + '<span>' + (state.shareOn ? "Stop Share" : "Share Screen") + '</span></button>' +
         '<button class="control-btn"><span class="more-dots">•••</span><span>More</span></button>' +
@@ -746,8 +751,23 @@ function wireParticipantVideo(video) {
   video.volume = 1;
   video.addEventListener("ended", function() {
     handleVideoEnded(video.dataset.personId);
+    syncAudioIndicator();
   });
-  video.play().catch(function(){});
+  video.addEventListener("play", syncAudioIndicator);
+  video.addEventListener("playing", syncAudioIndicator);
+  video.addEventListener("pause", syncAudioIndicator);
+  video.addEventListener("volumechange", syncAudioIndicator);
+  video.play().then(syncAudioIndicator).catch(syncAudioIndicator);
+}
+
+function syncAudioIndicator() {
+  const playing = Array.from(document.querySelectorAll("video.participant-video")).some(function(video) {
+    return state.audioEnabled && !video.muted && !video.paused && !video.ended && Number.isFinite(video.currentTime);
+  });
+  state.audioPlaying = playing;
+  document.querySelectorAll('[data-action="toggle-participants"]').forEach(function(button) {
+    button.classList.toggle("audio-playing", playing);
+  });
 }
 
 function bind() {
@@ -794,6 +814,7 @@ function bind() {
   document.querySelectorAll("video.participant-video").forEach(function(v) {
     wireParticipantVideo(v);
   });
+  syncAudioIndicator();
 }
 
 
