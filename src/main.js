@@ -243,21 +243,55 @@ function participantTile(person) {
 }
 
 function renderMeeting() {
-  const allPeople = [{id:"me",name:state.displayName,role:"You",initials:initialsFor(state.displayName),hue:145,videos:state.myVideos,currentVideoIndex:state.myVideoIndex,cameraVisible:!state.cameraHidden.me}].concat(state.fakePeople);
+  const allPeople = [
+    {
+      id: "me",
+      name: state.displayName,
+      role: "You",
+      initials: initialsFor(state.displayName),
+      hue: 145,
+      videos: state.myVideos || [],
+      currentVideoIndex: state.myVideoIndex,
+      cameraVisible: !state.cameraHidden.me
+    }
+  ].concat(state.fakePeople);
+
   const tiles = allPeople.map(participantTile).join("");
+
   return '<div class="meeting-page">' +
-    '<header class="meeting-topbar"><div class="meeting-title"><span class="live-dot"></span><div><strong>Product sync</strong><span>Meeting ID: ' + state.meetingId + '</span></div></div><div class="meeting-top-actions"><button class="top-action" data-action="toggle-audio">" + (state.audioEnabled ? "Video audio on" : "Enable video audio") + "</button><button class="top-action">Security</button><button class="top-action">View</button><button class="icon-button dark">" + icon("more") + "</button></div></section>' +
-    (state.participantsOpen ? renderParticipants() : "") + (state.chatOpen ? renderChat() : "") + '</main>' +
-    '<footer class="meeting-controls"><div class="controls-group">' +
-      '<button class="control-btn ' + (state.micOn ? "" : "off") + '" data-action="toggle-mic">' + icon(state.micOn ? "mic" : "micOff") + '<span>' + (state.micOn ? "Mute" : "Unmute") + '</span></button><button class="control-caret">⌄</button>' +
-      '<button class="control-btn ' + (state.cameraOn ? "" : "off") + '" data-action="toggle-camera">' + icon(state.cameraOn ? "video" : "videoOff") + '<span>' + (state.cameraOn ? "Stop Video" : "Start Video") + '</span></button><button class="control-caret">⌄</button>' +
-      '<button class="control-btn" data-action="add-video">' + icon("video") + '<span>Fake Camera</span></button>' +
-    '</div><div class="controls-center">' +
-      '<button class="control-btn ' + (state.participantsOpen ? "selected" : "") + '" data-action="toggle-participants">' + icon("users") + '<span>Participants <b>' + allPeople.length + '</b></span></button>' +
-      '<button class="control-btn ' + (state.chatOpen ? "selected" : "") + '" data-action="toggle-chat">' + icon("chat") + '<span>Chat</span></button>' +
-      '<button class="control-btn ' + (state.shareOn ? "selected share" : "") + '" data-action="toggle-share">' + icon("share") + '<span>' + (state.shareOn ? "Stop Share" : "Share Screen") + '</span></button>' +
-      '<button class="control-btn"><span class="more-dots">•••</span><span>More</span></button>' +
-    '</div><button class="end-call" data-page="home">' + icon("phone") + '<span>End</span></button></footer></div>';
+    '<header class="meeting-topbar">' +
+      '<div class="meeting-title"><span class="live-dot"></span><div><strong>Product sync</strong><span>Meeting ID: ' + state.meetingId + '</span></div></div>' +
+      '<div class="meeting-top-actions">' +
+        '<button class="top-action" data-action="toggle-audio">' + (state.audioEnabled ? "Video audio on" : "Enable video audio") + '</button>' +
+        '<button class="top-action">Security</button>' +
+        '<button class="top-action">View</button>' +
+        '<button class="icon-button dark">' + icon("more") + '</button>' +
+      '</div>' +
+    '</header>' +
+    '<main class="meeting-main">' +
+      '<section class="meeting-stage">' +
+        '<div class="meeting-grid ' + (allPeople.length > 4 ? "dense" : "") + '">' + tiles + '</div>' +
+      '</section>' +
+      (state.participantsOpen ? renderParticipants() : "") +
+      (state.chatOpen ? renderChat() : "") +
+    '</main>' +
+    '<footer class="meeting-controls">' +
+      '<div class="controls-group">' +
+        '<button class="control-btn ' + (state.micOn ? "" : "off") + '" data-action="toggle-mic">' + icon(state.micOn ? "mic" : "micOff") + '<span>' + (state.micOn ? "Mute" : "Unmute") + '</span></button>' +
+        '<button class="control-caret">⌄</button>' +
+        '<button class="control-btn ' + (state.cameraOn ? "" : "off") + '" data-action="toggle-camera">' + icon(state.cameraOn ? "video" : "videoOff") + '<span>' + (state.cameraOn ? "Stop Video" : "Start Video") + '</span></button>' +
+        '<button class="control-caret">⌄</button>' +
+        '<button class="control-btn" data-action="add-video">' + icon("video") + '<span>Fake Camera</span></button>' +
+      '</div>' +
+      '<div class="controls-center">' +
+        '<button class="control-btn ' + (state.participantsOpen ? "selected" : "") + '" data-action="toggle-participants">' + icon("users") + '<span>Participants <b>' + allPeople.length + '</b></span></button>' +
+        '<button class="control-btn ' + (state.chatOpen ? "selected" : "") + '" data-action="toggle-chat">' + icon("chat") + '<span>Chat</span></button>' +
+        '<button class="control-btn ' + (state.shareOn ? "selected share" : "") + '" data-action="toggle-share">' + icon("share") + '<span>' + (state.shareOn ? "Stop Share" : "Share Screen") + '</span></button>' +
+        '<button class="control-btn"><span class="more-dots">•••</span><span>More</span></button>' +
+      '</div>' +
+      '<button class="end-call" data-page="home">' + icon("phone") + '<span>End</span></button>' +
+    '</footer>' +
+  '</div>';
 }
 
 function renderParticipants() {
