@@ -72,7 +72,9 @@ const state = {
   participantSearch: "",
   participantOptionsOpen: false,
   roomMode: "local",
-  remoteMeetingId: ""
+  remoteMeetingId: "",
+  savedMeetings: [],
+  savedMeetingsLoading: true
 };
 
 const TUTORIAL_STORAGE_KEY = "zoom-copy-tutorial-complete";
@@ -207,7 +209,7 @@ function showFirstTimeTutorial() {
 const recordingAvatarImages = new Map();
 
 const MEETING_DB_NAME = "zoom-copy-meeting-storage";
-const MEETING_DB_VERSION = 1;
+const MEETING_DB_VERSION = 2;
 const MEETING_RECORD_ID = "active";
 let meetingDbPromise = null;
 let meetingSaveTimer = 0;
@@ -230,6 +232,9 @@ function openMeetingDb() {
       const db = request.result;
       if (!db.objectStoreNames.contains("meetings")) {
         db.createObjectStore("meetings", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("savedMeetings")) {
+        db.createObjectStore("savedMeetings", { keyPath: "id" });
       }
     };
 
@@ -395,7 +400,129 @@ function putMeetingRecord(record) {
   });
 }
 
-async function saveMeetingState() {
+async function putSavedMeetingRecord(record) {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("savedMeetings", "readwrite");
+      tx.objectStore("savedMeetings").put(record);
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error || new Error("Could not save the meeting to the library.")); };
+      tx.onabort = function() { reject(tx.error || new Error("Meeting library save was aborted.")); };
+    });
+  });
+}
+
+function getSavedMeetingRecords() {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("savedMeetings", "readonly");
+      const request = tx.objectStore("savedMeetings").getAll();
+      request.onsuccess = function() {
+        resolve(Array.isArray(request.result) ? request.result : []);
+      };
+      request.onerror = function() {
+        reject(request.error || new Error("Could not load saved meetings."));
+      };
+    });
+  });
+}
+
+function getSavedMeetingRecord(meetingId) {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("savedMeetings", "readonly");
+      const request = tx.objectStore("savedMeetings").get(String(meetingId));
+      request.onsuccess = function() { resolve(request.result || null); };
+      request.onerror = function() {
+        reject(request.error || new Error("Could not open the saved meeting."));
+      };
+    });
+  });
+}
+
+function savedMeetingPreview(record) {
+  const saved = record && record.state ? record.state : {};
+  const people = Array.isArray(saved.fakePeople) ? saved.fakePeople : [];
+  const myVideos = Array.isArray(saved.myVideos) ? saved.myVideos : [];
+  const fakeVideoCount = people.reduce(function(total, person) {
+    return total + (Array.isArray(person.videos) ? person.videos.length : 0);
+  }, 0);
+  return {
+    id: String(saved.meetingId || record.id || ""),
+    savedAt: Number(record.savedAt || Date.now()),
+    participants: people.length + 1,
+    videos: myVideos.length + fakeVideoCount
+  };
+}
+
+function rememberSavedMeeting(record) {
+  const preview = savedMeetingPreview(record);
+  if (!preview.id) return;
+
+  const existing = state.savedMeetings.findIndex(function(item) {
+    return item.id === preview.id;
+  });
+  if (existing >= 0) state.savedMeetings.splice(existing, 1);
+  state.savedMeetings.push(preview);
+  state.savedMeetings.sort(function(a, b) { return b.savedAt - a.savedAt; });
+}
+
+async function loadSavedMeetingLibrary() {
+  try {
+    const records = await getSavedMeetingRecords();
+    state.savedMeetings = records
+      .map(savedMeetingPreview)
+      .filter(function(item) { return Boolean(item.id); })
+      .sort(function(a, b) { return b.savedAt - a.savedAt; });
+  } catch (error) {
+    console.warn("Saved meeting library could not be loaded.", error);
+    state.savedMeetings = [];
+  } finally {
+    state.savedMeetingsLoading = false;
+  }
+}
+
+async function openSavedMeeting(meetingId) {
+  try {
+    const record = await getSavedMeetingRecord(meetingId);
+    if (!record || !record.state) {
+      alert("That saved meeting could not be found.");
+      return false;
+    }
+
+    destroyRoomConnection();
+    revokeVideos(state.myVideos || []);
+    (state.fakePeople || []).forEach(function(person) {
+      revokeVideos(person.videos || []);
+      revokeBlob(person.avatarUrl);
+    });
+    revokeBlob(state.myAvatarUrl);
+
+    restoringMeeting = true;
+    try {
+      restoreMeetingRecord(record);
+    } finally {
+      restoringMeeting = false;
+    }
+
+    state.page = "meeting";
+    state.meetingStarted = true;
+    state.roomMode = "local";
+    state.remoteMeetingId = "";
+    state.participantOptionsOpen = false;
+    render();
+    restorePersistedPlayback();
+    startHostRoom();
+    rememberSavedMeeting(record);
+    return true;
+  } catch (error) {
+    console.error("Could not open saved meeting.", error);
+    alert("The saved meeting could not be opened. Please try again.");
+    return false;
+  }
+}
+
+function saveMeetingState() {
   if (restoringMeeting || !state.meetingStarted) return;
   if (meetingSaveInProgress) {
     meetingSaveQueued = true;
@@ -405,7 +532,14 @@ async function saveMeetingState() {
   meetingSaveInProgress = true;
   try {
     const built = await buildSavedMeetingState();
-    await putMeetingRecord(built.record);
+    const libraryRecord = Object.assign({}, built.record, {
+      id: built.record.state.meetingId
+    });
+    await Promise.all([
+      putMeetingRecord(built.record),
+      putSavedMeetingRecord(libraryRecord)
+    ]);
+    rememberSavedMeeting(libraryRecord);
 
     if (navigator.storage && navigator.storage.persist) {
       try { await navigator.storage.persist(); } catch (error) {}
@@ -1684,9 +1818,14 @@ function renderHome() {
       '</article>' +
       '<div class="quick-column"><button class="quick-card" data-action="start-meeting"><div class="quick-icon blue">' + icon("video") + '</div><div><strong>New meeting</strong><span>Start instantly</span></div><b>›</b></button><button class="quick-card" data-action="open-participants"><div class="quick-icon green">' + icon("users") + '</div><div><strong>Fake participants</strong><span>Add people to your call</span></div><b>›</b></button><div class="tip-card"><span class="tip-label">SIMULATED CAMERA</span><strong>Upload a video file and use it as a meeting camera tile.</strong><p>Your file stays local to this browser session.</p></div></div>' +
     '</section>' +
-    '<section class="section"><div class="section-heading"><div><span class="eyebrow">Recent</span><h3>Meetings</h3></div><button class="text-button" data-action="open-participants">View all</button></div><div class="meeting-list">' +
-      '<div class="meeting-row"><div class="meeting-icon">' + icon("video") + '</div><div><strong>Product sync</strong><span>Today · 14 participants</span></div><span class="meeting-id">846 221 904</span><button class="join-small" data-action="join-meeting">Join</button></div>' +
-      '<div class="meeting-row"><div class="meeting-icon">' + icon("chat") + '</div><div><strong>Design review</strong><span>Yesterday · 6 participants</span></div><span class="meeting-id">532 118 227</span><button class="join-small" data-page="meeting">Join</button></div>' +
+    '<section class="section"><div class="section-heading"><div><span class="eyebrow">Saved</span><h3>Meetings</h3></div><button class="text-button" data-action="start-meeting">New meeting</button></div><div class="meeting-list">' +
+      (state.savedMeetingsLoading ? '<div class="saved-empty"><strong>Loading saved meetings…</strong></div>' :
+        state.savedMeetings.length ? state.savedMeetings.map(function(meeting) {
+          const savedDate = meeting.savedAt ? new Date(meeting.savedAt).toLocaleString() : "Saved locally";
+          const videoText = meeting.videos ? meeting.videos + " video" + (meeting.videos === 1 ? "" : "s") : "No videos";
+          return '<div class="meeting-row saved-meeting-row"><div class="meeting-icon">' + icon("video") + '</div><div><strong>Meeting ' + escapeHtml(formatMeetingId(meeting.id)) + '</strong><span>' + escapeHtml(meeting.participants + " participant" + (meeting.participants === 1 ? "" : "s")) + " · " + escapeHtml(videoText) + " · Last saved " + escapeHtml(savedDate) + '</span></div><span class="meeting-id">' + escapeHtml(formatMeetingId(meeting.id)) + '</span><button class="join-small" data-action="open-saved-meeting" data-meeting-id="' + escapeHtml(meeting.id) + '">Open</button></div>';
+        }).join("") :
+        '<div class="saved-empty"><strong>No saved meetings yet</strong><span>Your meetings will automatically be saved here and stay available on this browser.</span></div>') +
     '</div></section>';
   return shell(content, "home");
 }
@@ -3529,9 +3668,16 @@ function bind() {
   document.querySelectorAll("[data-action]").forEach(function(el){
     el.addEventListener("click", function(){
       const a = el.dataset.action;
+      if (a === "open-saved-meeting") {
+        openSavedMeeting(el.dataset.meetingId);
+        return;
+      }
       if (a === "start-meeting") {
         destroyRoomConnection();
         state.meetingId = generateMeetingId();
+        while (state.savedMeetings.some(function(meeting) { return meeting.id === state.meetingId; })) {
+          state.meetingId = generateMeetingId();
+        }
         state.page = "meeting";
         state.meetingStarted = true;
         state.chatOpen = false;
@@ -3784,6 +3930,7 @@ window.addEventListener("keydown", function(e) {
 });
 
 async function bootMeetingApp() {
+  await loadSavedMeetingLibrary();
   const restored = await restoreSavedMeeting();
   normalizeHosts();
   render();
