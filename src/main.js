@@ -649,6 +649,8 @@ function renderMeeting() {
   const allPeople = (state.myParticipantHidden ? [] : [myPerson]).concat(state.fakePeople);
 
   const tiles = allPeople.map(participantTile).join("");
+  const peopleCount = allPeople.length;
+  const gridSizeClass = peopleCount <= 2 ? "people-2" : peopleCount <= 4 ? "people-4" : peopleCount <= 6 ? "people-6" : peopleCount <= 9 ? "people-9" : peopleCount <= 12 ? "people-12" : "people-many";
 
   return '<div class="meeting-page">' +
     '<header class="meeting-topbar">' +
@@ -662,7 +664,7 @@ function renderMeeting() {
     '</header>' +
     '<main class="meeting-main">' +
       '<section class="meeting-stage">' +
-        '<div class="meeting-grid ' + (allPeople.length > 4 ? "dense" : "") + '">' + tiles + '</div>' +
+        '<div class="meeting-grid ' + gridSizeClass + '">' + tiles + '</div>' +
       '</section>' +
       (state.participantsOpen ? renderParticipants() : "") +
       (state.chatOpen ? renderChat() : "") +
