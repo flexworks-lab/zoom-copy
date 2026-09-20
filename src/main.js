@@ -26,17 +26,19 @@ const state = {
   displayName: "Me",
   hostId: "alex",
   fakePeople: [
-    { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true, needsNextOnCamera: false },
-    { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true, needsNextOnCamera: false },
-    { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true, needsNextOnCamera: false }
+    { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false },
+    { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false },
+    { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false }
   ],
   myVideos: [],
   myVideoIndex: 0,
   myAutoPlayNext: false,
+  myAutoCameraOff: true,
   cameraHidden: {},
   keybinds: {},
   nextKeybinds: {},
   audioKeybinds: {},
+  leaveKeybinds: {},
   myAudioOn: true,
   audioEnabled: true,
   audioPlaying: false,
@@ -150,6 +152,7 @@ function getParticipant(personId) {
       currentVideoIndex: state.myVideoIndex,
       cameraVisible: !state.cameraHidden.me,
       autoPlayNext: state.myAutoPlayNext,
+      autoCameraOff: state.myAutoCameraOff,
       audioOn: state.myAudioOn,
       needsNextOnCamera: state.needsNextOnCamera
     };
@@ -312,6 +315,17 @@ function handleVideoEnded(personId) {
     return;
   }
 
+  const autoCameraOff = person.id === "me" ? state.myAutoCameraOff !== false : person.autoCameraOff !== false;
+  if (!autoCameraOff) {
+    if (personId === "me") state.needsNextOnCamera = false;
+    else {
+      const target = state.fakePeople.find(function(p) { return p.id === personId; });
+      if (target) target.needsNextOnCamera = false;
+    }
+    syncAudioIndicator();
+    return;
+  }
+
   if (personId === "me") {
     state.cameraHidden.me = true;
     state.cameraOn = false;
@@ -345,6 +359,41 @@ function setNextKeybind(personId, key) {
     if (id !== personId && state.nextKeybinds[id] === normalized) delete state.nextKeybinds[id];
   });
   state.nextKeybinds[personId] = normalized;
+}
+
+function setLeaveKeybind(personId, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  delete state.leaveKeybinds[personId];
+  if (!/^[a-z0-9]$/i.test(normalized)) return;
+  Object.keys(state.leaveKeybinds).forEach(function(id) {
+    if (id !== personId && state.leaveKeybinds[id] === normalized) delete state.leaveKeybinds[id];
+  });
+  state.leaveKeybinds[personId] = normalized;
+}
+
+function playLeaveSound() {
+  const audio = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
+  audio.volume = 0.9;
+  audio.play().catch(function() {});
+}
+
+function leavePerson(personId) {
+  const index = state.fakePeople.findIndex(function(p) { return p.id === personId; });
+  if (index < 0) return false;
+
+  const person = state.fakePeople[index];
+  revokeVideos(person.videos);
+  state.fakePeople.splice(index, 1);
+  delete state.keybinds[personId];
+  delete state.nextKeybinds[personId];
+  delete state.audioKeybinds[personId];
+  delete state.leaveKeybinds[personId];
+  normalizeHosts();
+  playLeaveSound();
+  updateParticipantsListOnly();
+  updateParticipantTile(personId);
+  if (state.recording) syncRecordingAudio();
+  return true;
 }
 
 function setAudioKeybind(personId, key) {
@@ -640,7 +689,7 @@ function openParticipantEditor(personId) {
   const isMe = personId === "me";
   const existing = !isNew && getParticipant(personId);
   const person = isNew
-    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, audioOn: true }
+    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true }
     : existing;
   if (!person) return;
 
@@ -648,7 +697,9 @@ function openParticipantEditor(personId) {
   const currentKey = isNew ? "" : (state.keybinds[personId] || "");
   const currentNextKey = isNew ? "" : (state.nextKeybinds[personId] || "");
   const currentAudioKey = isNew ? "" : (state.audioKeybinds[personId] || "");
+  const currentLeaveKey = isNew || isMe ? "" : (state.leaveKeybinds[personId] || "");
   const autoPlayNext = isNew ? false : (isMe ? state.myAutoPlayNext : person.autoPlayNext === true);
+  const autoCameraOff = isNew ? true : (isMe ? state.myAutoCameraOff !== false : person.autoCameraOff !== false);
   const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
 
   const modal = document.createElement("div");
@@ -670,7 +721,10 @@ function openParticipantEditor(personId) {
       '<label class="field-label">Audio keybind<input name="audioKeybind" class="keybind-input" value="' + escapeHtml(currentAudioKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
       '<div class="file-help">Toggle this person’s MP4 audio on or off.</div>' +
       '<label class="check-row autoplay-row"><input name="autoPlayNext" type="checkbox" ' + (autoPlayNext ? "checked" : "") + '><span>Auto-play the next video when this one ends</span></label>' +
-      '<div class="file-help">Off: the camera turns off when the video ends. On: the playlist advances in order.</div>' +
+      '<div class="file-help">Off: the camera stays on the last video frame. On: the camera turns off when the video ends.</div>' +
+      '<label class="check-row autoplay-row"><input name="autoCameraOff" type="checkbox" ' + (autoCameraOff ? "checked" : "") + '><span>Turn camera off when video ends</span></label>' +
+      '<div class="file-help">Disable this to keep the camera tile visible after a video finishes.</div>' +
+      (!isNew && !isMe ? '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label><div class="file-help">This person leaves the meeting when the key is pressed.</div>' : '') +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
       (!isNew && videos.length > 1 ? '<button type="button" class="secondary" data-next-video>Play next now</button>' : '') +
       '</div>' +
@@ -726,13 +780,14 @@ function openParticipantEditor(personId) {
       delete state.keybinds[personId];
       delete state.nextKeybinds[personId];
       delete state.audioKeybinds[personId];
+      delete state.leaveKeybinds[personId];
       normalizeHosts();
       modal.remove();
       render();
     });
   }
 
-  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"]').forEach(function(input) {
+  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"], [name="leaveKeybind"]').forEach(function(input) {
     input.addEventListener("keydown", function(e) {
       if (["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
       e.preventDefault();
@@ -755,6 +810,8 @@ function openParticipantEditor(personId) {
     const key = String(fd.get("keybind") || "").trim();
     const nextKey = String(fd.get("nextKeybind") || "").trim();
     const audioKey = String(fd.get("audioKeybind") || "").trim();
+    const leaveKey = String(fd.get("leaveKeybind") || "").trim();
+    const autoCameraOff = form.querySelector('[name="autoCameraOff"]').checked;
 
     if (isNew) {
       const newPerson = {
@@ -767,6 +824,7 @@ function openParticipantEditor(personId) {
         currentVideoIndex: 0,
         cameraVisible: true,
         autoPlayNext: autoPlay,
+        autoCameraOff: autoCameraOff,
         audioOn: true,
         needsNextOnCamera: false
       };
@@ -779,6 +837,7 @@ function openParticipantEditor(personId) {
     } else if (isMe) {
       state.displayName = name;
       state.myAutoPlayNext = autoPlay;
+      state.myAutoCameraOff = autoCameraOff;
       if (clearVideos) {
         revokeVideos(state.myVideos);
         state.myVideos = [];
@@ -803,6 +862,7 @@ function openParticipantEditor(personId) {
       target.name = name;
       target.initials = initialsFor(name);
       target.autoPlayNext = autoPlay;
+      target.autoCameraOff = autoCameraOff;
       if (clearVideos) {
         revokeVideos(target.videos);
         target.videos = [];
@@ -815,6 +875,7 @@ function openParticipantEditor(personId) {
       setPersonKeybind(personId, key);
       setNextKeybind(personId, nextKey);
       setAudioKeybind(personId, audioKey);
+      setLeaveKeybind(personId, leaveKey);
       normalizeHosts();
     }
 
@@ -1541,6 +1602,15 @@ window.addEventListener("keydown", function(e) {
   if (nextPersonId) {
     e.preventDefault();
     advancePersonVideo(nextPersonId);
+    return;
+  }
+
+  const leavePersonId = Object.keys(state.leaveKeybinds).find(function(id) {
+    return state.leaveKeybinds[id] === key;
+  });
+  if (leavePersonId) {
+    e.preventDefault();
+    leavePerson(leavePersonId);
     return;
   }
 
