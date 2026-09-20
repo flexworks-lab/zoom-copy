@@ -1248,7 +1248,22 @@ function getRecordingAvatarImage(person) {
 function safeDrawRecordingAvatarImage(ctx, image, x, y, width, height) {
   if (!ctx || !image || !image.complete || !image.naturalWidth || !image.naturalHeight) return false;
   try {
-    ctx.drawImage(image, x, y, width, height);
+    const sourceRatio = image.naturalWidth / image.naturalHeight;
+    const boxRatio = width / height;
+    let drawWidth = width;
+    let drawHeight = height;
+    let drawX = x;
+    let drawY = y;
+
+    if (sourceRatio > boxRatio) {
+      drawHeight = width / sourceRatio;
+      drawY = y + (height - drawHeight) / 2;
+    } else {
+      drawWidth = height * sourceRatio;
+      drawX = x + (width - drawWidth) / 2;
+    }
+
+    ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
     return true;
   } catch (error) {
     console.warn("Participant PFP could not be drawn into the recording. Falling back to initials.", error);
@@ -1588,7 +1603,7 @@ function drawRecordingFrame() {
           hue: 145,
           avatarUrl: state.myAvatarUrl
         };
-        const meAvatar = getRecordingAvatarImage(me);
+        let meAvatar = getRecordingAvatarImage(me);
 
         ctx.fillStyle = "hsl(145,65%,45%)";
         roundedRectPath(ctx, px + 15, py, 32, 32, 9);
