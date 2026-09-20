@@ -1053,6 +1053,116 @@ function drawRecordingLabel(ctx, person, x, y, w, h) {
   ctx.fillText(label, x + 10 + padX, boxY + boxH / 2);
 }
 
+function drawRecordingControlIcon(ctx, name, centerX, centerY, size, color) {
+  const s = Math.max(1, size / 24);
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.scale(s, s);
+  ctx.strokeStyle = color || "#dce3eb";
+  ctx.fillStyle = color || "#dce3eb";
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  if (name === "mic") {
+    ctx.moveTo(12, 2);
+    ctx.arc(12, 5, 3, 0, Math.PI * 2);
+    ctx.moveTo(9, 5);
+    ctx.lineTo(9, 12);
+    ctx.arc(12, 12, 3, Math.PI, 0, true);
+    ctx.moveTo(15, 5);
+    ctx.lineTo(15, 12);
+    ctx.moveTo(5, 10);
+    ctx.lineTo(5, 12);
+    ctx.arc(12, 12, 7, Math.PI, 0, false);
+    ctx.moveTo(12, 19);
+    ctx.lineTo(12, 22);
+    ctx.moveTo(8, 22);
+    ctx.lineTo(16, 22);
+    ctx.stroke();
+  } else if (name === "micOff") {
+    ctx.moveTo(4, 4);
+    ctx.lineTo(20, 20);
+    ctx.moveTo(9, 5);
+    ctx.lineTo(9, 11);
+    ctx.arc(12, 12, 3, Math.PI, 0, true);
+    ctx.moveTo(15, 5);
+    ctx.lineTo(15, 12);
+    ctx.moveTo(5, 10);
+    ctx.lineTo(5, 12);
+    ctx.arc(12, 12, 7, Math.PI, 0, false);
+    ctx.moveTo(12, 19);
+    ctx.lineTo(12, 22);
+    ctx.moveTo(8, 22);
+    ctx.lineTo(16, 22);
+    ctx.stroke();
+  } else if (name === "video" || name === "videoOff") {
+    ctx.rect(3, 6, 12, 12);
+    ctx.moveTo(15, 10);
+    ctx.lineTo(20, 7);
+    ctx.arc(20, 9.5, 2.5, -Math.PI / 2, Math.PI / 2);
+    ctx.lineTo(15, 15);
+    ctx.stroke();
+    if (name === "videoOff") {
+      ctx.moveTo(4, 4);
+      ctx.lineTo(20, 20);
+      ctx.stroke();
+    }
+  } else if (name === "users") {
+    ctx.arc(9, 7, 4, 0, Math.PI * 2);
+    ctx.moveTo(2, 21);
+    ctx.lineTo(2, 19);
+    ctx.arc(6, 19, 4, Math.PI, 0, false);
+    ctx.moveTo(16, 4);
+    ctx.arc(17, 7, 3, 0, Math.PI * 2);
+    ctx.moveTo(16, 14);
+    ctx.arc(18, 19, 4, Math.PI, 0, false);
+    ctx.stroke();
+  } else if (name === "chat") {
+    ctx.moveTo(21, 11.5);
+    ctx.arc(12, 11.5, 9, 0, Math.PI * 2);
+    ctx.moveTo(5, 18);
+    ctx.lineTo(4, 22);
+    ctx.lineTo(9, 19);
+    ctx.stroke();
+  } else if (name === "share") {
+    ctx.moveTo(12, 3);
+    ctx.lineTo(12, 15);
+    ctx.moveTo(7, 8);
+    ctx.lineTo(12, 3);
+    ctx.lineTo(17, 8);
+    ctx.moveTo(5, 12);
+    ctx.lineTo(5, 19);
+    ctx.arc(7, 19, 2, Math.PI, Math.PI / 2, true);
+    ctx.lineTo(17, 21);
+    ctx.arc(19, 19, 2, Math.PI / 2, 0, true);
+    ctx.lineTo(19, 12);
+    ctx.stroke();
+  } else if (name === "record") {
+    ctx.beginPath();
+    ctx.arc(12, 12, 6, 0, Math.PI * 2);
+    ctx.stroke();
+  } else if (name === "more") {
+    ctx.beginPath();
+    ctx.arc(5, 12, 1.2, 0, Math.PI * 2);
+    ctx.arc(12, 12, 1.2, 0, Math.PI * 2);
+    ctx.arc(19, 12, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (name === "phone") {
+    ctx.moveTo(7, 4);
+    ctx.lineTo(10, 7);
+    ctx.lineTo(8, 9);
+    ctx.arc(14, 15, 5, Math.PI, 1.5 * Math.PI, false);
+    ctx.lineTo(15, 16);
+    ctx.lineTo(18, 14);
+    ctx.lineTo(21, 17);
+    ctx.arc(19, 19, 3, -Math.PI / 2, 0, false);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawRecordingFrame() {
   const canvas = recordingState.canvas;
   const ctx = recordingState.context;
@@ -1308,7 +1418,8 @@ function drawRecordingFrame() {
     {label: "Participants " + people.length, x: 274, icon: "users"},
     {label: "Chat", x: 370, icon: "chat"},
     {label: state.shareOn ? "Stop Share" : "Share Screen", x: 442, icon: "share"},
-    {label: state.recording ? "Stop Recording" : "Record", x: 552, icon: state.recording ? "stop" : "record"},
+    // Keep the recording control visually neutral in the exported video.
+    {label: "Record", x: 552, icon: "record"},
     {label: "More", x: 670, icon: "more"}
   ];
 
@@ -1316,29 +1427,28 @@ function drawRecordingFrame() {
     const selected = item.label.indexOf("Participants") === 0 ? state.participantsOpen : (item.label === "Chat" ? state.chatOpen : false);
     if (selected) {
       ctx.fillStyle = "rgba(255,255,255,.07)";
-      roundedRectPath(ctx, item.x - 18, cy + 8, 64, 48, 9);
+      roundedRectPath(ctx, item.x - 18, cy + 6, 64, 50, 9);
       ctx.fill();
     }
-    if (item.label === "Stop Recording") {
-      ctx.fillStyle = "rgba(223,62,72,.12)";
-      roundedRectPath(ctx, item.x - 18, cy + 8, 90, 48, 9);
-      ctx.fill();
-    }
-    ctx.fillStyle = item.label === "Stop Video" || item.label === "Unmute" ? "#dce3eb" : "#dce3eb";
+
+    drawRecordingControlIcon(ctx, item.icon, item.x + 14, cy + 20, 19, "#dce3eb");
+
+    ctx.fillStyle = "#dce3eb";
     ctx.font = "800 8px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(item.label, item.x + 14, cy + 44);
+    ctx.fillText(item.label, item.x + 14, cy + 45);
   });
 
   // End call.
   ctx.fillStyle = "#df3e48";
   roundedRectPath(ctx, width - 78, cy + 17, 62, 38, 8);
   ctx.fill();
+  drawRecordingControlIcon(ctx, "phone", width - 56, cy + 29, 15, "#ffffff");
   ctx.fillStyle = "#ffffff";
-  ctx.font = "800 9px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText("End", width - 47, cy + 37);
+  ctx.font = "800 8px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("End", width - 45, cy + 37);
 
   recordingState.animationFrame = requestAnimationFrame(drawRecordingFrame);
 }
