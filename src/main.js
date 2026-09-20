@@ -484,7 +484,19 @@ function bind() {
       if (a === "toggle-share") state.shareOn = !state.shareOn;
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
+        document.querySelectorAll("video.participant-video").forEach(function(v) {
+          v.muted = !state.audioEnabled;
+          v.volume = 1;
+          if (state.audioEnabled) v.play().catch(function(){});
+        });
         render();
+        if (state.audioEnabled) {
+          document.querySelectorAll("video.participant-video").forEach(function(v) {
+            v.muted = false;
+            v.volume = 1;
+            v.play().catch(function(){});
+          });
+        }
         return;
       }
       if (a === "add-person") { openAddPerson(); return; }
