@@ -26,9 +26,9 @@ const state = {
   displayName: "Me",
   hostId: "alex",
   fakePeople: [
-    { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false },
-    { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false },
-    { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false }
+    { id: "alex", name: "Alex Morgan", role: "Host", initials: "AM", hue: 200, avatarUrl: null, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false },
+    { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280, avatarUrl: null, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false },
+    { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35, avatarUrl: null, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true, needsNextOnCamera: false }
   ],
   myVideos: [],
   myVideoIndex: 0,
@@ -43,7 +43,8 @@ const state = {
   audioEnabled: true,
   audioPlaying: false,
   recording: false,
-  myParticipantHidden: false
+  myParticipantHidden: false,
+  myAvatarUrl: null
 };
 
 const recordingState = {
@@ -101,6 +102,18 @@ function revokeBlob(url) {
   if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
+function getAvatarUrl(person) {
+  if (!person) return null;
+  return person.id === "me" ? (state.myAvatarUrl || null) : (person.avatarUrl || null);
+}
+
+function avatarMarkup(person, className) {
+  const avatarUrl = getAvatarUrl(person);
+  return avatarUrl
+    ? '<img class="' + className + '" src="' + escapeHtml(avatarUrl) + '" alt="' + escapeHtml(person.name || "Participant") + ' profile picture">'
+    : '';
+}
+
 function getVideos(person) {
   if (!person) return [];
   if (person.id === "me") return state.myVideos || [];
@@ -152,6 +165,7 @@ function getParticipant(personId) {
       videos: state.myVideos || [],
       currentVideoIndex: state.myVideoIndex,
       cameraVisible: !state.cameraHidden.me,
+      avatarUrl: state.myAvatarUrl,
       autoPlayNext: state.myAutoPlayNext,
       autoCameraOff: state.myAutoCameraOff,
       audioOn: state.myAudioOn,
@@ -410,6 +424,7 @@ function leavePerson(personId) {
 
   const person = state.fakePeople[index];
   revokeVideos(person.videos);
+  revokeBlob(person.avatarUrl);
   state.fakePeople.splice(index, 1);
   delete state.keybinds[personId];
   delete state.nextKeybinds[personId];
@@ -569,7 +584,7 @@ function participantTile(person) {
   const media = showVideo
     ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '" autoplay playsinline' +
       (state.audioEnabled && isPersonAudioOn(person) ? "" : " muted") + '></video>'
-    : '<div class="participant-avatar" style="--hue:' + person.hue + '"><span>' + escapeHtml(person.initials) + '</span></div>';
+    : '<div class="participant-avatar" style="--hue:' + person.hue + '">' + avatarMarkup(person, "participant-avatar-image") + '<span' + (getAvatarUrl(person) ? ' class="participant-avatar-initials"' : '') + '>' + escapeHtml(person.initials) + '</span></div>';
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
   return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge + mutedBadge +
@@ -646,7 +661,7 @@ function renderMeeting() {
     currentVideoIndex: state.myVideoIndex,
     cameraVisible: !state.cameraHidden.me
   };
-  const allPeople = (state.myParticipantHidden ? [] : [myPerson]).concat(state.fakePeople);
+  const allPeople = (state.myParticipantHidden ? [] : [Object.assign({}, myPerson, { avatarUrl: state.myAvatarUrl })]).concat(state.fakePeople);
 
   const tiles = allPeople.map(participantTile).join("");
   const peopleCount = allPeople.length;
@@ -695,13 +710,13 @@ function renderParticipants() {
   const myVideos = state.myVideos || [];
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
-    '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
+    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button><div class="participant-list">' +
     state.fakePeople.map(function(p){
       const videos = getVideos(p);
       const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
-      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + avatarMarkup(p, "avatar-image") + (p.avatarUrl ? '' : '<span>' + escapeHtml(p.initials) + '</span>') + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
@@ -720,7 +735,7 @@ function openParticipantEditor(personId) {
   const isMe = personId === "me";
   const existing = !isNew && getParticipant(personId);
   const person = isNew
-    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true }
+    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), avatarUrl: null, videos: [], currentVideoIndex: 0, cameraVisible: true, autoPlayNext: false, autoCameraOff: true, audioOn: true }
     : existing;
   if (!person) return;
 
@@ -742,6 +757,9 @@ function openParticipantEditor(personId) {
       '<h2>' + (isNew ? "Add a fake person" : (isMe ? "Edit your meeting identity" : "Edit fake person")) + '</h2>' +
       '<p class="muted">' + (isNew ? "Add multiple video clips and camera controls." : "Change the name, video playlist, autoplay behavior, or keyboard shortcuts.") + '</p>' +
       '<label class="field-label">Display name<input name="name" required maxlength="28" value="' + escapeHtml(person.name) + '" placeholder="Taylor Kim" autofocus></label>' +
+      '<label class="field-label">Profile picture<input name="avatar" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/*"></label>' +
+      '<div class="file-help">' + (getAvatarUrl(person) ? "Current profile picture is set. Choose a new image to replace it." : "Add a square or portrait image to use as this participant’s PFP.") + '</div>' +
+      (!isNew && getAvatarUrl(person) ? '<label class="check-row"><input name="clearAvatar" type="checkbox"><span>Remove profile picture</span></label>' : '') +
       '<label class="field-label">Add video files<input name="video" type="file" accept="video/mp4,video/webm,video/quicktime,video/*" multiple></label>' +
       '<div class="file-help">' + (videos.length ? videos.length + " video" + (videos.length === 1 ? "" : "s") + " currently assigned. New files are added." : "Select multiple MP4 or phone videos at once.") + '</div>' +
       (videos.length ? '<div class="video-playlist">' + videos.map(function(v, i) { return '<div class="video-playlist-row"><span>' + (i + 1) + '</span><strong>' + escapeHtml(v.name || ("Video " + (i + 1))) + '</strong>' + (i === currentIndex ? '<em>Now playing</em>' : '') + '</div>'; }).join("") + '</div>' : '') +
@@ -806,6 +824,7 @@ function openParticipantEditor(personId) {
       const index = state.fakePeople.findIndex(function(p) { return p.id === personId; });
       if (index >= 0) {
         revokeVideos(state.fakePeople[index].videos);
+        revokeBlob(state.fakePeople[index].avatarUrl);
         state.fakePeople.splice(index, 1);
       }
       delete state.keybinds[personId];
@@ -836,7 +855,11 @@ function openParticipantEditor(personId) {
     const fd = new FormData(form);
     const name = String(fd.get("name") || "").trim() || "Guest";
     const files = fd.getAll("video");
+    const avatarFile = fd.get("avatar");
     const clearVideos = form.querySelector('[name="clearVideos"]').checked;
+    const clearAvatarInput = form.querySelector('[name="clearAvatar"]');
+    const clearAvatar = clearAvatarInput ? clearAvatarInput.checked : false;
+    const hasAvatarFile = avatarFile instanceof File && avatarFile.size > 0;
     const autoPlay = form.querySelector('[name="autoPlayNext"]').checked;
     const key = String(fd.get("keybind") || "").trim();
     const nextKey = String(fd.get("nextKeybind") || "").trim();
@@ -848,6 +871,7 @@ function openParticipantEditor(personId) {
       const newPerson = {
         id: crypto.randomUUID(),
         name: name,
+        avatarUrl: hasAvatarFile ? URL.createObjectURL(avatarFile) : null,
         role: "",
         initials: initialsFor(name),
         hue: Math.floor(Math.random() * 360),
@@ -868,6 +892,13 @@ function openParticipantEditor(personId) {
       setLeaveKeybind(newPerson.id, leaveKey);
     } else if (isMe) {
       state.displayName = name;
+      if (clearAvatar) {
+        revokeBlob(state.myAvatarUrl);
+        state.myAvatarUrl = null;
+      } else if (hasAvatarFile) {
+        revokeBlob(state.myAvatarUrl);
+        state.myAvatarUrl = URL.createObjectURL(avatarFile);
+      }
       state.myAutoPlayNext = autoPlay;
       state.myAutoCameraOff = autoCameraOff;
       if (clearVideos) {
@@ -894,6 +925,13 @@ function openParticipantEditor(personId) {
       if (!target) return;
       target.name = name;
       target.initials = initialsFor(name);
+      if (clearAvatar) {
+        revokeBlob(target.avatarUrl);
+        target.avatarUrl = null;
+      } else if (hasAvatarFile) {
+        revokeBlob(target.avatarUrl);
+        target.avatarUrl = URL.createObjectURL(avatarFile);
+      }
       target.autoPlayNext = autoPlay;
       target.autoCameraOff = autoCameraOff;
       if (clearVideos) {
