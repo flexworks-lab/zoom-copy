@@ -1,5 +1,6 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
+import { Peer } from "peerjs";
 
 import "./style.css";
 
@@ -15,10 +16,23 @@ window.addEventListener("unhandledrejection", function (event) {
   app.innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;background:#f6f8fb;font-family:system-ui,sans-serif;padding:24px"><div style="max-width:620px;width:100%;background:#fff;border:1px solid #e5e9ef;border-radius:18px;padding:28px;box-shadow:0 15px 40px rgba(20,32,45,.08)"><strong style="color:#df3e48">The meeting UI had an unexpected error.</strong><p style="color:#718096;line-height:1.5">Refresh the page and try again.</p></div></div>';
 });
 
+function generateMeetingId() {
+  return String(Math.floor(100000000 + Math.random() * 900000000));
+}
+
+function normalizeMeetingId(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 9);
+}
+
+function formatMeetingId(value) {
+  const digits = normalizeMeetingId(value);
+  return digits.replace(/(\d{3})(?=\d)/g, "$1 ");
+}
+
 const state = {
   page: "home",
   meetingStarted: false,
-  meetingId: "846 221 904",
+  meetingId: generateMeetingId(),
   micOn: true,
   cameraOn: true,
   shareOn: false,
@@ -56,7 +70,9 @@ const state = {
   myParticipantHidden: false,
   myAvatarUrl: null,
   participantSearch: "",
-  participantOptionsOpen: false
+  participantOptionsOpen: false,
+  roomMode: "local",
+  remoteMeetingId: ""
 };
 
 const TUTORIAL_STORAGE_KEY = "zoom-copy-tutorial-complete";
@@ -1273,7 +1289,310 @@ function restoreVideoState(snapshot) {
   });
 }
 
+let roomPeer = null;
+let roomStream = null;
+let roomCanvas = null;
+let roomCanvasContext = null;
+let roomDrawTimer = 0;
+let roomPeerGeneration = 0;
+
+function destroyRoomConnection() {
+  roomPeerGeneration += 1;
+  if (roomDrawTimer) {
+    clearTimeout(roomDrawTimer);
+    roomDrawTimer = 0;
+  }
+  if (roomPeer) {
+    try { roomPeer.destroy(); } catch (error) {}
+  }
+  roomPeer = null;
+  if (roomStream) {
+    roomStream.getTracks().forEach(function(track) {
+      try { track.stop(); } catch (error) {}
+    });
+  }
+  roomStream = null;
+  roomCanvas = null;
+  roomCanvasContext = null;
+  state.roomMode = "local";
+  state.remoteMeetingId = "";
+}
+
+function createWatchCanvasStream() {
+  if (roomStream) return roomStream;
+  roomCanvas = document.createElement("canvas");
+  roomCanvas.width = 1280;
+  roomCanvas.height = 720;
+  roomCanvasContext = roomCanvas.getContext("2d", { alpha: false });
+  roomStream = roomCanvas.captureStream(15);
+  drawWatchFrame();
+  return roomStream;
+}
+
+function getWatchPeople() {
+  const me = {
+    id: "me",
+    name: state.displayName,
+    initials: initialsFor(state.displayName),
+    hue: 145
+  };
+  return (state.myParticipantHidden ? [] : [me]).concat(state.fakePeople || []);
+}
+
+function drawWatchFrame() {
+  if (!roomCanvasContext || !roomCanvas) return;
+  const ctx = roomCanvasContext;
+  const width = roomCanvas.width;
+  const height = roomCanvas.height;
+
+  ctx.fillStyle = "#0b1118";
+  ctx.fillRect(0, 0, width, height);
+
+  const people = getWatchPeople();
+  const count = Math.max(1, people.length);
+  const columns = count <= 1 ? 1 : count <= 4 ? 2 : count <= 9 ? 3 : 4;
+  const rows = Math.ceil(count / columns);
+  const gap = 10;
+  const topBar = 58;
+  const tileWidth = (width - gap * (columns + 1)) / columns;
+  const tileHeight = (height - topBar - gap * (rows + 1)) / rows;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 18px system-ui, sans-serif";
+  ctx.fillText("Zoom Copy", 22, 35);
+  ctx.fillStyle = "#9fb0c0";
+  ctx.font = "500 13px system-ui, sans-serif";
+  ctx.fillText("Meeting ID: " + formatMeetingId(state.meetingId), 136, 35);
+  ctx.fillStyle = "#35c76f";
+  ctx.beginPath();
+  ctx.arc(width - 55, 29, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#c8d3de";
+  ctx.font = "700 11px system-ui, sans-serif";
+  ctx.fillText("LIVE", width - 42, 33);
+
+  people.forEach(function(person, index) {
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = gap + column * (tileWidth + gap);
+    const y = topBar + gap + row * (tileHeight + gap);
+
+    ctx.fillStyle = "#111a24";
+    ctx.fillRect(x, y, tileWidth, tileHeight);
+
+    const tile = document.querySelector('.participant-tile[data-person-id="' + person.id + '"]');
+    const video = tile && tile.querySelector("video.participant-video");
+    const canDrawVideo = video && video.readyState >= 2 && !video.ended && video.videoWidth > 0 && video.videoHeight > 0;
+
+    if (canDrawVideo) {
+      const scale = Math.min(tileWidth / video.videoWidth, tileHeight / video.videoHeight);
+      const drawWidth = video.videoWidth * scale;
+      const drawHeight = video.videoHeight * scale;
+      ctx.drawImage(video, x + (tileWidth - drawWidth) / 2, y + (tileHeight - drawHeight) / 2, drawWidth, drawHeight);
+    } else {
+      ctx.fillStyle = "hsl(" + (person.hue || 145) + " 38% 22%)";
+      ctx.fillRect(x, y, tileWidth, tileHeight);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "800 " + Math.max(24, Math.min(56, tileHeight * 0.24)) + "px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(person.initials || initialsFor(person.name), x + tileWidth / 2, y + tileHeight / 2);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+
+    ctx.fillStyle = "rgba(0,0,0,.62)";
+    ctx.fillRect(x, y + tileHeight - 34, tileWidth, 34);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "700 13px system-ui, sans-serif";
+    ctx.fillText(person.name || "Participant", x + 10, y + tileHeight - 12);
+  });
+
+  if (people.length === 0) {
+    ctx.fillStyle = "#a8b5c2";
+    ctx.font = "600 20px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No participants are currently visible", width / 2, height / 2);
+    ctx.textAlign = "start";
+  }
+
+  if (roomCanvas) {
+    roomDrawTimer = setTimeout(drawWatchFrame, 66);
+  }
+}
+
+function startHostRoom() {
+  if (roomPeer && !roomPeer.destroyed && state.roomMode === "host" && state.remoteMeetingId === "") return;
+
+  destroyRoomConnection();
+  state.roomMode = "host";
+  state.remoteMeetingId = "";
+
+  const generation = ++roomPeerGeneration;
+  const startPeer = function() {
+    if (generation !== roomPeerGeneration || state.roomMode !== "host") return;
+    const peerId = normalizeMeetingId(state.meetingId);
+    roomPeer = new Peer(peerId, { host: "0.peerjs.com", port: 443, secure: true, debug: 1 });
+
+    roomPeer.on("open", function() {
+      createWatchCanvasStream();
+    });
+
+    roomPeer.on("call", function(call) {
+      if (state.roomMode !== "host") return;
+      const stream = createWatchCanvasStream();
+      try {
+        call.answer(stream);
+        call.on("error", function(error) {
+          console.warn("Remote watch connection failed.", error);
+        });
+      } catch (error) {
+        console.warn("Could not answer remote watcher.", error);
+      }
+    });
+
+    roomPeer.on("error", function(error) {
+      console.warn("Meeting room connection error:", error);
+      if (error && error.type === "unavailable-id" && generation === roomPeerGeneration) {
+        try { roomPeer.destroy(); } catch (destroyError) {}
+        roomPeer = null;
+        state.meetingId = generateMeetingId();
+        render();
+        startHostRoom();
+      }
+    });
+
+    roomPeer.on("disconnected", function() {
+      if (state.roomMode === "host" && roomPeer && !roomPeer.destroyed) {
+        try { roomPeer.reconnect(); } catch (error) {}
+      }
+    });
+  };
+
+  startPeer();
+}
+
+function renderRemoteMeeting() {
+  return '<div class="remote-meeting-page">' +
+    '<header class="meeting-topbar"><div class="meeting-title"><span class="live-dot"></span><div><strong>Watching live meeting</strong><span>Meeting ID: ' + escapeHtml(formatMeetingId(state.remoteMeetingId)) + '</span></div></div><div class="meeting-top-actions"><span class="remote-live-badge" data-remote-status>Connecting…</span><button class="top-action" data-action="leave-remote-meeting">Leave</button></div></header>' +
+    '<main class="remote-meeting-main"><div class="remote-video-shell"><video id="remote-meeting-video" class="remote-meeting-video" autoplay playsinline></video><div class="remote-video-message" data-remote-message>Connecting to the host…</div></div><div class="remote-watch-note">You are watching another user’s simulated meeting live. Their uploaded videos stay on their device and are streamed directly to you.</div></main>' +
+  '</div>';
+}
+
+function joinRemoteMeeting(meetingId) {
+  const id = normalizeMeetingId(meetingId);
+  if (id.length !== 9) {
+    alert("Enter the 9-digit meeting ID.");
+    return false;
+  }
+
+  if (state.roomMode === "host" && normalizeMeetingId(state.meetingId) === id) {
+    alert("You are already hosting this meeting.");
+    return false;
+  }
+
+  destroyRoomConnection();
+  state.roomMode = "watcher";
+  state.remoteMeetingId = id;
+  state.page = "meeting";
+  state.meetingStarted = false;
+  state.participantsOpen = false;
+  state.chatOpen = false;
+  render();
+
+  roomPeer = new Peer(undefined, { host: "0.peerjs.com", port: 443, secure: true, debug: 1 });
+
+  const showStatus = function(status, message, error) {
+    const statusEl = document.querySelector("[data-remote-status]");
+    const messageEl = document.querySelector("[data-remote-message]");
+    if (statusEl) statusEl.textContent = status;
+    if (messageEl) {
+      messageEl.textContent = message;
+      messageEl.classList.toggle("error", Boolean(error));
+    }
+  };
+
+  roomPeer.on("open", function() {
+    showStatus("Connecting", "Waiting for the host to answer…");
+    const canvas = document.createElement("canvas");
+    canvas.width = 2;
+    canvas.height = 2;
+    const placeholder = canvas.captureStream(1);
+    const call = roomPeer.call(id, placeholder);
+    placeholder.getTracks().forEach(function(track) {
+      try { track.stop(); } catch (error) {}
+    });
+
+    if (!call) {
+      showStatus("Offline", "That meeting could not be reached.", true);
+      return;
+    }
+
+    call.on("stream", function(stream) {
+      const video = document.querySelector("#remote-meeting-video");
+      if (!video) return;
+      video.srcObject = stream;
+      video.play().catch(function() {});
+      showStatus("LIVE", "You are watching the host’s fake meeting.", false);
+    });
+    call.on("close", function() {
+      showStatus("Ended", "The host ended the meeting or disconnected.", true);
+    });
+    call.on("error", function(error) {
+      console.warn("Remote meeting call failed.", error);
+      showStatus("Offline", "Could not connect to that meeting ID.", true);
+    });
+  });
+
+  roomPeer.on("error", function(error) {
+    console.warn("Watcher room connection error:", error);
+    showStatus("Offline", error && error.type === "peer-unavailable" ? "No live meeting is using that ID." : "Could not connect to that meeting.", true);
+  });
+  return true;
+}
+
+function openJoinMeetingDialog() {
+  const existing = document.querySelector(".join-meeting-backdrop");
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.className = "tutorial-backdrop join-meeting-backdrop";
+  modal.innerHTML = '<form class="tutorial-card join-meeting-card"><button type="button" class="tutorial-close join-meeting-close">×</button><div class="tutorial-icon">' + icon("video") + '</div><span class="eyebrow">Join a meeting</span><h2>Enter a meeting ID</h2><p class="tutorial-body">Enter the 9-digit ID shared by another user to watch their simulated meeting live.</p><label class="field-label">Meeting ID<input name="meetingId" inputmode="numeric" autocomplete="off" maxlength="11" placeholder="123 456 789" required></label><p class="join-meeting-error" data-join-error></p><div class="tutorial-actions"><button type="button" class="secondary join-meeting-close">Cancel</button><span></span><button type="submit" class="primary">Join</button></div></form>';
+  document.body.appendChild(modal);
+  const form = modal.querySelector("form");
+  const input = form.querySelector('[name="meetingId"]');
+  const error = form.querySelector("[data-join-error]");
+
+  modal.querySelectorAll(".join-meeting-close").forEach(function(button) {
+    button.addEventListener("click", function() { modal.remove(); });
+  });
+  modal.addEventListener("click", function(event) {
+    if (event.target === modal) modal.remove();
+  });
+  form.addEventListener("submit", function(event) {
+    event.preventDefault();
+    const id = normalizeMeetingId(input.value);
+    if (id.length !== 9) {
+      error.textContent = "Meeting IDs are 9 digits.";
+      return;
+    }
+    modal.remove();
+    joinRemoteMeeting(id);
+  });
+  input.addEventListener("input", function() {
+    const digits = normalizeMeetingId(input.value);
+    input.value = formatMeetingId(digits);
+    error.textContent = "";
+  });
+  input.focus();
+}
+
 function render() {
+  if (state.page === "meeting" && state.roomMode === "watcher") {
+    app.innerHTML = renderRemoteMeeting();
+    bind();
+    return;
+  }
   if (state.page === "meeting") state.meetingStarted = true;
   const videoState = state.page === "meeting" ? captureVideoState() : {};
   if (state.page === "meeting") app.innerHTML = renderMeeting();
@@ -1592,7 +1911,7 @@ function renderMeeting() {
         '<button class="control-btn ' + (state.recording ? "recording-active" : "") + '" data-action="toggle-recording">' + icon(state.recording ? "stop" : "record") + '<span>' + (state.recording ? "Stop Recording" : "Record") + '</span></button>' +
         '<button class="control-btn"><span class="more-dots">•••</span><span>More</span></button>' +
       '</div>' +
-      '<button class="end-call" data-page="home">' + icon("phone") + '<span>End</span></button>' +
+      '<button class="end-call" data-action="end-meeting">' + icon("phone") + '<span>End</span></button>' +
     '</footer>' +
   '</div>';
 }
@@ -3116,23 +3435,56 @@ function bind() {
   document.querySelectorAll("[data-action]").forEach(function(el){
     el.addEventListener("click", function(){
       const a = el.dataset.action;
-      if (a === "start-meeting" || a === "join-meeting") {
+      if (a === "start-meeting") {
+        destroyRoomConnection();
+        state.meetingId = generateMeetingId();
         state.page = "meeting";
         state.meetingStarted = true;
         state.chatOpen = false;
+        state.participantsOpen = true;
+        render();
+        startHostRoom();
+        queueMeetingSave();
+        return;
+      }
+      if (a === "join-meeting") {
+        openJoinMeetingDialog();
+        return;
+      }
+      if (a === "leave-remote-meeting") {
+        destroyRoomConnection();
+        state.page = "home";
+        state.meetingStarted = false;
         render();
         return;
       }
       if (a === "open-participants") {
-        state.page = "meeting";
-        state.meetingStarted = true;
-        state.participantsOpen = true;
-        state.chatOpen = false;
-        render();
+        if (state.roomMode === "watcher") return;
+        if (state.page !== "meeting") {
+          destroyRoomConnection();
+          state.meetingId = generateMeetingId();
+          state.page = "meeting";
+          state.meetingStarted = true;
+          state.participantsOpen = true;
+          state.chatOpen = false;
+          render();
+          startHostRoom();
+          queueMeetingSave();
+        } else {
+          state.participantsOpen = true;
+          render();
+        }
         return;
       }
       if (a === "open-tutorial") {
         openTutorial(false);
+        return;
+      }
+      if (a === "end-meeting") {
+        destroyRoomConnection();
+        state.page = "home";
+        state.meetingStarted = false;
+        render();
         return;
       }
       if (a === "toggle-mic") state.micOn = !state.micOn;
@@ -3334,7 +3686,10 @@ async function bootMeetingApp() {
   const restored = await restoreSavedMeeting();
   normalizeHosts();
   render();
-  if (restored) restorePersistedPlayback();
+  if (restored) {
+    restorePersistedPlayback();
+    startHostRoom();
+  }
   showFirstTimeTutorial();
 }
 
