@@ -50,6 +50,8 @@ const state = {
   participantSearch: ""
 };
 
+const recordingAvatarImages = new Map();
+
 const recordingState = {
   recorder: null,
   chunks: [],
@@ -1022,17 +1024,67 @@ function roundedRectPath(ctx, x, y, w, h, radius) {
   ctx.closePath();
 }
 
+function getRecordingAvatarImage(person) {
+  const url = getAvatarUrl(person);
+  if (!url) return null;
+
+  let entry = recordingAvatarImages.get(person.id);
+  if (!entry || entry.url !== url) {
+    const image = new Image();
+    entry = { url: url, image: image, ready: false };
+    recordingAvatarImages.set(person.id, entry);
+    image.onload = function() {
+      entry.ready = true;
+    };
+    image.onerror = function() {
+      entry.ready = false;
+    };
+    image.src = url;
+  }
+
+  return entry.ready ? entry.image : null;
+}
+
 function drawRecordingAvatar(ctx, person, x, y, w, h) {
   const gradient = ctx.createRadialGradient(x + w / 2, y + h * 0.38, 8, x + w / 2, y + h / 2, Math.max(w, h) * 0.75);
   gradient.addColorStop(0, "hsl(" + person.hue + ", 65%, 44%)");
   gradient.addColorStop(1, "hsl(" + person.hue + ", 40%, 18%)");
   ctx.fillStyle = gradient;
   ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "800 " + Math.max(28, Math.min(w, h) * 0.15) + "px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(person.initials || "GU", x + w / 2, y + h / 2);
+
+  const avatarImage = getRecordingAvatarImage(person);
+  if (avatarImage) {
+    const imageRatio = avatarImage.naturalWidth / avatarImage.naturalHeight;
+    const tileRatio = w / h;
+    let drawWidth = w;
+    let drawHeight = h;
+    let drawX = x;
+    let drawY = y;
+
+    if (imageRatio > tileRatio) {
+      drawWidth = h * imageRatio;
+      drawX = x + (w - drawWidth) / 2;
+    } else {
+      drawHeight = w / imageRatio;
+      drawY = y + (h - drawHeight) / 2;
+    }
+
+    ctx.save();
+    roundedRectPath(ctx, x, y, w, h, 10);
+    ctx.clip();
+    ctx.drawImage(avatarImage, drawX, drawY, drawWidth, drawHeight);
+    ctx.restore();
+
+    // Keep the same dark lower gradient used behind video tiles.
+    ctx.fillStyle = "rgba(0,0,0,.16)";
+    ctx.fillRect(x, y, w, h);
+  } else {
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 " + Math.max(28, Math.min(w, h) * 0.15) + "px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(person.initials || "GU", x + w / 2, y + h / 2);
+  }
 }
 
 function drawRecordingLabel(ctx, person, x, y, w, h) {
@@ -1828,6 +1880,7 @@ function cleanupRecording() {
     }
   });
   recordingState.mediaSources.clear();
+  recordingAvatarImages.clear();
 
   if (recordingState.audioContext) {
     try { recordingState.audioContext.close(); } catch (error) {}
