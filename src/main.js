@@ -756,12 +756,17 @@ function renderMeeting() {
 
 function renderParticipants() {
   normalizeHosts();
-  return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + state.fakePeople.length + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
+  const safeDisplayName = escapeHtml(state.displayName);
+  const myVideos = state.myVideos || [];
+  const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
+  return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
+    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
+    '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
     '<div class="participant-list">' +
     state.fakePeople.filter(function(p){ return !state.participantSearch || p.name.toLowerCase().includes(state.participantSearch.toLowerCase()); }).map(function(p){
       const videos = getVideos(p);
-      const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : "";
+      const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
       return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + avatarMarkup(p, "avatar-image") + (p.avatarUrl ? '' : '<span>' + escapeHtml(p.initials) + '</span>') + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
@@ -1387,50 +1392,30 @@ function drawRecordingFrame() {
       ctx.fillText("Participants", px + 16, topBar + 23);
       ctx.fillStyle = "#8c97a3";
       ctx.font = "10px system-ui, sans-serif";
-      ctx.fillText((state.fakePeople.length + 1) + " in meeting", px + 16, topBar + 39);
+      ctx.fillText(state.fakePeople.length + " in meeting", px + 16, topBar + 39);
 
       let py = topBar + 55;
-      ctx.fillStyle = "#fafbfd";
-      roundedRectPath(ctx, px + 14, py, panelWidth - 28, 50, 10);
-      ctx.fill();
-      ctx.strokeStyle = "#e5e9ef";
-      ctx.stroke();
-      ctx.fillStyle = "#1b2632";
-      ctx.font = "700 11px system-ui, sans-serif";
-      ctx.fillText(state.displayName, px + 60, py + 21);
-      ctx.fillStyle = "#8e98a4";
-      ctx.font = "9px system-ui, sans-serif";
-      ctx.fillText("You · " + (state.myVideos.length || 0) + " video" + (state.myVideos.length === 1 ? "" : "s") + (state.myAudioOn ? " · Audio on" : " · Audio off"), px + 60, py + 36);
-
-      py += 60;
-      ctx.fillStyle = "#f7faff";
-      roundedRectPath(ctx, px + 14, py, panelWidth - 28, 45, 10);
-      ctx.fill();
-      ctx.strokeStyle = "#bfcad6";
-      ctx.setLineDash([4, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#247cdc";
-      ctx.font = "800 18px system-ui, sans-serif";
-      ctx.fillText("+", px + 25, py + 27);
-      ctx.fillStyle = "#1b2632";
-      ctx.font = "700 11px system-ui, sans-serif";
-      ctx.fillText("Add fake person", px + 50, py + 20);
-      ctx.fillStyle = "#8893a0";
-      ctx.font = "9px system-ui, sans-serif";
-      ctx.fillText("Custom name + multiple videos", px + 50, py + 33);
-
-      py += 56;
       state.fakePeople.forEach(function(person) {
         const initials = person.initials || initialsFor(person.name);
         ctx.fillStyle = "hsl(" + person.hue + ",65%,45%)";
         roundedRectPath(ctx, px + 15, py, 32, 32, 9);
         ctx.fill();
-        ctx.fillStyle = "#ffffff";
-        ctx.font = "800 10px system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(initials, px + 31, py + 16);
+
+        const recordingAvatar = getRecordingAvatarImage(person);
+        if (recordingAvatar) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(px + 31, py + 16, 15, 0, Math.PI * 2);
+          ctx.clip();
+          ctx.drawImage(recordingAvatar, px + 16, py + 1, 30, 30);
+          ctx.restore();
+        } else {
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "800 10px system-ui, sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(initials, px + 31, py + 16);
+        }
 
         ctx.textAlign = "left";
         ctx.fillStyle = "#1b2632";
@@ -1439,11 +1424,13 @@ function drawRecordingFrame() {
         ctx.fillStyle = "#8e98a4";
         ctx.font = "8px system-ui, sans-serif";
         const hostText = person.id === state.hostId ? "Host" : "Participant";
-        const mediaText = getVideos(person).length ? (person.cameraVisible === false ? " · Camera hidden" : " · " + getVideos(person).length + " video" + (getVideos(person).length === 1 ? "" : "s")) : " · No camera";
+        const videoText = getVideos(person).length ? (person.cameraVisible === false ? " · Camera hidden" : " · " + getVideos(person).length + " video" + (getVideos(person).length === 1 ? "" : "s")) : "";
         const audioText = person.audioOn === false ? " · Muted" : "";
-        ctx.fillText(hostText + mediaText + audioText, px + 55, py + 25);
+        ctx.fillText(hostText + videoText + audioText, px + 55, py + 25);
         py += 40;
       });
+
+      // No "Me" row and no "Add fake person" row are included in recordings.
     } else if (state.chatOpen) {
       ctx.fillStyle = "#1b2632";
       ctx.textAlign = "left";
