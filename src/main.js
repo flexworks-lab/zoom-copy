@@ -44,7 +44,8 @@ const state = {
   audioPlaying: false,
   recording: false,
   myParticipantHidden: false,
-  myAvatarUrl: null
+  myAvatarUrl: null,
+  participantSearch: ""
 };
 
 const recordingState = {
@@ -711,8 +712,10 @@ function renderParticipants() {
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
     '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
-    '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button><div class="participant-list">' +
-    state.fakePeople.map(function(p){
+    '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
+    '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
+    '<div class="participant-list">' +
+    state.fakePeople.filter(function(p){ return !state.participantSearch || p.name.toLowerCase().includes(state.participantSearch.toLowerCase()); }).map(function(p){
       const videos = getVideos(p);
       const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
@@ -1647,6 +1650,28 @@ function bind() {
   document.querySelectorAll("video.participant-video").forEach(function(v) {
     wireParticipantVideo(v);
   });
+
+  const participantSearch = document.querySelector("[data-participant-search]");
+  if (participantSearch) {
+    participantSearch.addEventListener("input", function() {
+      state.participantSearch = participantSearch.value;
+      const list = document.querySelector(".participant-list");
+      if (!list) return;
+      const wrapper = document.createElement("template");
+      wrapper.innerHTML = renderParticipants().trim();
+      const newPanel = wrapper.content.firstElementChild;
+      if (!newPanel) return;
+      const currentPanel = document.querySelector(".participants-panel");
+      if (currentPanel) currentPanel.replaceWith(newPanel);
+      bind();
+      const newSearch = document.querySelector("[data-participant-search]");
+      if (newSearch) {
+        newSearch.focus();
+        newSearch.setSelectionRange(newSearch.value.length, newSearch.value.length);
+      }
+    });
+  }
+
   syncAudioIndicator();
 }
 
