@@ -92,3 +92,6 @@ button{border:0;cursor:pointer}
 .video-playlist-row em{font-size:8px;color:#2d8cff;font-style:normal;font-weight:800}
 .editor-actions-row{display:flex;align-items:center;gap:10px;margin-top:14px}
 .editor-actions-row .check-row{margin-top:0;flex:1}
+
+.modal{max-height:calc(100vh - 40px);overflow-y:auto;overscroll-behavior:contain}
+.modal-backdrop{overflow:auto}
