@@ -1294,7 +1294,7 @@ function shell(content, active) {
         '<button class="nav-item" data-action="contacts">' + icon("users") + '<span>Contacts</span></button>' +
         '<button class="nav-item ' + (active === "settings" ? "active" : "") + '" data-page="settings">' + icon("settings") + '<span>Settings</span></button>' +
       '</nav>' +
-      '<div class="sidebar-bottom"><button class="profile-chip" data-page="settings"><div class="avatar small">MC</div><div><strong>My account</strong><span>Available</span></div><span class="chevron">⌄</span></div></div>' +
+      '<div class="sidebar-bottom"><button class="profile-chip" data-page="settings"><div class="avatar small">MC</div><div><strong>My account</strong><span>Available</span></div><span class="chevron">⌄</span></button></div>' +
     '</aside><main class="page">' + content + '</main></div>';
 }
 
