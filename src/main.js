@@ -391,6 +391,63 @@ function participantTile(person) {
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
 }
 
+function updateParticipantTile(personId) {
+  const person = getParticipant(personId);
+  if (!person) return;
+
+  const tiles = document.querySelectorAll(".participant-tile[data-person-id]");
+  let currentTile = null;
+  tiles.forEach(function(tile) {
+    if (tile.dataset.personId === personId) currentTile = tile;
+  });
+  if (!currentTile) return;
+
+  const oldVideo = currentTile.querySelector("video.participant-video");
+  const oldSrc = oldVideo ? (oldVideo.currentSrc || oldVideo.src) : "";
+  const oldTime = oldVideo && Number.isFinite(oldVideo.currentTime) ? oldVideo.currentTime : 0;
+  const wasPaused = oldVideo ? oldVideo.paused : true;
+
+  const wrapper = document.createElement("template");
+  wrapper.innerHTML = participantTile(person).trim();
+  const newTile = wrapper.content.firstElementChild;
+  if (!newTile) return;
+
+  currentTile.replaceWith(newTile);
+
+  const newVideo = newTile.querySelector("video.participant-video");
+  if (!newVideo) return;
+
+  wireParticipantVideo(newVideo);
+
+  const newSrc = newVideo.currentSrc || newVideo.src;
+  if (oldVideo && oldSrc && newSrc === oldSrc) {
+    const restore = function() {
+      try {
+        if (Number.isFinite(oldTime) && oldTime > 0) {
+          newVideo.currentTime = Math.min(oldTime, Math.max(0, (newVideo.duration || oldTime) - 0.05));
+        }
+      } catch (error) {}
+      if (!wasPaused) newVideo.play().catch(function(){});
+    };
+
+    if (newVideo.readyState >= 1) restore();
+    else newVideo.addEventListener("loadedmetadata", restore, { once: true });
+  }
+}
+
+function updateParticipantsListOnly() {
+  const panel = document.querySelector(".participants-panel");
+  if (!panel) return;
+
+  const wrapper = document.createElement("template");
+  wrapper.innerHTML = renderParticipants().trim();
+  const newPanel = wrapper.content.firstElementChild;
+  if (!newPanel) return;
+
+  panel.replaceWith(newPanel);
+  bind();
+}
+
 function renderMeeting() {
   const allPeople = [
     {
