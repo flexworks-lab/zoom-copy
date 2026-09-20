@@ -1047,13 +1047,9 @@ function wireParticipantVideo(video) {
 }
 
 function getRecordingPeople() {
-  const me = {
-    id: "me",
-    name: state.displayName,
-    initials: initialsFor(state.displayName),
-    hue: 145
-  };
-  return (state.myParticipantHidden ? [] : [me]).concat(state.fakePeople);
+  // The exported recording intentionally shows only fake participants.
+  // "Me" stays in the live meeting UI but is never drawn into the recording.
+  return state.fakePeople.slice();
 }
 
 function roundedRectPath(ctx, x, y, w, h, radius) {
