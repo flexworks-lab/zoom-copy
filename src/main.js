@@ -174,7 +174,7 @@ function renderMeeting() {
   const tiles = allPeople.map(participantTile).join("");
   return '<div class="meeting-page">' +
     '<header class="meeting-topbar"><div class="meeting-title"><span class="live-dot"></span><div><strong>Product sync</strong><span>Meeting ID: ' + state.meetingId + '</span></div></div><div class="meeting-top-actions"><button class="top-action">Security</button><button class="top-action">View</button><button class="icon-button dark">' + icon("more") + '</button></div></header>' +
-    '<main class="meeting-main"><section class="meeting-stage"><div class="meeting-grid ' + (allPeople.length > 4 ? "dense" : "") + '">' + tiles + '</div><div class="meeting-empty-hint">' + (state.selectedVideo ? "Local video file is acting as your camera." : "Add a local video or fake people from Participants.") + '</div></section>' +
+    '<main class="meeting-main"><section class="meeting-stage"><div class="meeting-grid ' + (allPeople.length > 4 ? "dense" : "") + '">' + tiles + '</div></section>' +
     (state.participantsOpen ? renderParticipants() : "") + (state.chatOpen ? renderChat() : "") + '</main>' +
     '<footer class="meeting-controls"><div class="controls-group">' +
       '<button class="control-btn ' + (state.micOn ? "" : "off") + '" data-action="toggle-mic">' + icon(state.micOn ? "mic" : "micOff") + '<span>' + (state.micOn ? "Mute" : "Unmute") + '</span></button><button class="control-caret">⌄</button>' +
@@ -274,24 +274,7 @@ function openParticipantEditor(personId) {
       delete state.cameraHidden[personId];
       modal.remove();
       
-window.addEventListener("keydown", function(e) {
-  if (state.page !== "meeting") return;
-  const tag = e.target && e.target.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA" || e.isComposing) return;
-  const key = String(e.key || "").toLowerCase();
-  if (!/^[a-z0-9]$/.test(key)) return;
 
-  const personId = Object.keys(state.keybinds).find(function(id) {
-    return state.keybinds[id] === key;
-  });
-  if (!personId) return;
-
-  e.preventDefault();
-  togglePersonCamera(personId);
-  render();
-});
-
-render();
     });
   }
 
@@ -405,5 +388,24 @@ function bind() {
   });
   document.querySelectorAll("video.participant-video").forEach(function(v){ v.play().catch(function(){}); });
 }
+
+
+window.addEventListener("keydown", function(e) {
+  if (state.page !== "meeting") return;
+  const tag = e.target && e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || e.isComposing) return;
+  const key = String(e.key || "").toLowerCase();
+  if (!/^[a-z0-9]$/.test(key)) return;
+
+  const personId = Object.keys(state.keybinds).find(function(id) {
+    return state.keybinds[id] === key;
+  });
+  if (!personId) return;
+
+  e.preventDefault();
+  togglePersonCamera(personId);
+  render();
+});
+
 
 render();
