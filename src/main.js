@@ -55,7 +55,8 @@ const state = {
   recordingElapsedMs: 0,
   myParticipantHidden: false,
   myAvatarUrl: null,
-  participantSearch: ""
+  participantSearch: "",
+  participantOptionsOpen: false
 };
 
 const recordingAvatarImages = new Map();
@@ -1453,12 +1454,13 @@ function renderParticipants() {
   const safeDisplayName = escapeHtml(state.displayName);
   const myVideos = state.myVideos || [];
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
-  return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
+  return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><div class="panel-header-actions"><button class="panel-option-toggle" data-action="toggle-participant-options" aria-expanded="' + (state.participantOptionsOpen ? "true" : "false") + '">Options</button><button class="panel-close" data-action="toggle-participants">×</button></div></div>' +
     '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back" data-person-id="me">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
-    '<div class="global-video-shortcut"><div><strong>Pause all videos</strong><small>Keybind for every active clip.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
-    (state.leaveHistory.length ? '<button class="join-back-button" data-action="join-back"><span>↩</span><strong>Join Back</strong><small>Restore the last person who left with the same setup</small></button>' : '') +
-    '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div>' +
+    (state.participantOptionsOpen ? '<div class="participant-options"><div class="participant-options-title"><strong>Participant options</strong><button class="options-close" data-action="toggle-participant-options">Done</button></div>' +
+      '<div class="global-video-shortcut"><div><strong>Pause all videos</strong><small>Keybind for every active clip.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
+      (state.leaveHistory.length ? '<button class="join-back-button" data-action="join-back"><span>↩</span><strong>Join Back</strong><small>Restore the last person who left with the same setup</small></button>' : '') +
+      '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div></div>' : '') +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
     '<div class="participant-list">' +
     state.fakePeople.filter(function(p){ return !state.participantSearch || p.name.toLowerCase().includes(state.participantSearch.toLowerCase()); }).map(function(p){
@@ -2855,6 +2857,7 @@ function bind() {
         return;
       }
       if (a === "toggle-participants") state.participantsOpen = !state.participantsOpen;
+      if (a === "toggle-participant-options") { state.participantOptionsOpen = !state.participantOptionsOpen; render(); return; }
       if (a === "toggle-chat") state.chatOpen = !state.chatOpen;
       if (a === "toggle-share") state.shareOn = !state.shareOn;
       if (a === "toggle-recording") {
