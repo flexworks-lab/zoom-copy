@@ -1,3 +1,5 @@
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 import "./style.css";
 
@@ -37,7 +39,21 @@ const state = {
   audioKeybinds: {},
   myAudioOn: true,
   audioEnabled: true,
-  audioPlaying: false
+  audioPlaying: false,
+  recording: false
+};
+
+const recordingState = {
+  recorder: null,
+  chunks: [],
+  canvas: null,
+  context: null,
+  animationFrame: 0,
+  audioContext: null,
+  audioDestination: null,
+  mediaSources: new Map(),
+  ffmpeg: null,
+  ffmpegLoading: false
 };
 
 const icons = {
@@ -49,6 +65,8 @@ const icons = {
   chat: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.5 9.5 0 0 1-4.2-1l-4.8 1 1-4.6a8.2 8.2 0 0 1-1-4c0-4.7 4-8.4 9-8.4s9 3.8 9 8.5Z"/>',
   share: '<path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>',
   more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  record: '<circle cx="12" cy="12" r="6"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="2"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.8 1.8 0 0 0 .3 2l.1.1-1.9 1.9-.1-.1a1.8 1.8 0 0 0-2-.3 1.8 1.8 0 0 0-1.1 1.7V20h-2.7v-.2a1.8 1.8 0 0 0-1.1-1.7 1.8 1.8 0 0 0-2 .3l-.1.1-1.9-1.9.1-.1a1.8 1.8 0 0 0 .3-2 1.8 1.8 0 0 0-1.7-1.1H5.5v-2.7h.2a1.8 1.8 0 0 0 1.7-1.1 1.8 1.8 0 0 0-.3-2L7 7.4l1.9-1.9.1.1a1.8 1.8 0 0 0 2 .3A1.8 1.8 0 0 0 12 4.2V4h2.7v.2a1.8 1.8 0 0 0 1.1 1.7 1.8 1.8 0 0 0 2-.3l.1-.1 1.9 1.9-.1.1a1.8 1.8 0 0 0-.3 2 1.8 1.8 0 0 0 1.7 1.1h.2v2.7h-.2a1.8 1.8 0 0 0-1.7 1.1Z"/>',
   phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.6 19.6 0 0 1-8.5-3 19.3 19.3 0 0 1-5.9-5.9 19.6 19.6 0 0 1-3-8.6A2 2 0 0 1 4.4 2.2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8.4 10a16 16 0 0 0 5.8 5.8l1.1-1.2a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2.1Z"/>',
   home: '<path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/>'
@@ -164,6 +182,7 @@ function advancePersonVideo(personId) {
 
   updateParticipantTile(personId);
   updateParticipantsListOnly();
+  if (state.recording) syncRecordingAudio();
   return true;
 }
 
@@ -190,6 +209,7 @@ function togglePersonCamera(personId) {
 
   updateParticipantTile(personId);
   updateParticipantsListOnly();
+  if (state.recording) syncRecordingAudio();
 }
 
 function handleVideoEnded(personId) {
@@ -267,6 +287,7 @@ function setAudioForPerson(personId, enabled) {
   }
   updateParticipantTile(personId);
   updateParticipantsListOnly();
+  if (state.recording) syncRecordingAudio();
 }
 
 function revokeVideos(videos) {
@@ -499,6 +520,7 @@ function renderMeeting() {
         '<button class="control-btn ' + (state.participantsOpen ? "selected " : "") + (state.audioPlaying ? "audio-playing" : "") + '" data-action="toggle-participants">' + icon("users") + '<span>Participants <b>' + allPeople.length + '</b></span></button>' +
         '<button class="control-btn ' + (state.chatOpen ? "selected" : "") + '" data-action="toggle-chat">' + icon("chat") + '<span>Chat</span></button>' +
         '<button class="control-btn ' + (state.shareOn ? "selected share" : "") + '" data-action="toggle-share">' + icon("share") + '<span>' + (state.shareOn ? "Stop Share" : "Share Screen") + '</span></button>' +
+        '<button class="control-btn ' + (state.recording ? "recording-active" : "") + '" data-action="toggle-recording">' + icon(state.recording ? "stop" : "record") + '<span>' + (state.recording ? "Stop Recording" : "Record") + '</span></button>' +
         '<button class="control-btn"><span class="more-dots">•••</span><span>More</span></button>' +
       '</div>' +
       '<button class="end-call" data-page="home">' + icon("phone") + '<span>End</span></button>' +
@@ -720,6 +742,7 @@ function openParticipantEditor(personId) {
 
     modal.remove();
     render();
+    if (state.recording) syncRecordingAudio();
   });
 
   const nameInput = form.querySelector('[name="name"]');
@@ -741,6 +764,7 @@ function openFakeCameraPicker() {
     state.cameraHidden.me = false;
     updateParticipantTile("me");
     updateParticipantsListOnly();
+    if (state.recording) syncRecordingAudio();
   };
   input.click();
 }
@@ -758,6 +782,337 @@ function wireParticipantVideo(video) {
   video.addEventListener("pause", syncAudioIndicator);
   video.addEventListener("volumechange", syncAudioIndicator);
   video.play().then(syncAudioIndicator).catch(syncAudioIndicator);
+}
+
+function getRecordingPeople() {
+  return [
+    {
+      id: "me",
+      name: state.displayName,
+      initials: initialsFor(state.displayName),
+      hue: 145
+    }
+  ].concat(state.fakePeople);
+}
+
+function roundedRectPath(ctx, x, y, w, h, radius) {
+  const r = Math.min(radius, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawRecordingAvatar(ctx, person, x, y, w, h) {
+  const gradient = ctx.createRadialGradient(x + w / 2, y + h * 0.38, 8, x + w / 2, y + h / 2, Math.max(w, h) * 0.75);
+  gradient.addColorStop(0, "hsl(" + person.hue + ", 65%, 44%)");
+  gradient.addColorStop(1, "hsl(" + person.hue + ", 40%, 18%)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "800 " + Math.max(28, Math.min(w, h) * 0.15) + "px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(person.initials || "GU", x + w / 2, y + h / 2);
+}
+
+function drawRecordingLabel(ctx, person, x, y, w, h) {
+  const label = String(person.name || "Guest");
+  const fontSize = Math.max(16, Math.min(23, w * 0.024));
+  ctx.font = "700 " + fontSize + "px system-ui, sans-serif";
+  const metrics = ctx.measureText(label);
+  const padX = 12;
+  const boxW = metrics.width + padX * 2;
+  const boxH = fontSize + 14;
+  const boxY = y + h - boxH - 12;
+  ctx.fillStyle = "rgba(0,0,0,.58)";
+  roundedRectPath(ctx, x + 10, boxY, Math.min(boxW, w - 20), boxH, 7);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x + 10 + padX, boxY + boxH / 2);
+}
+
+function drawRecordingFrame() {
+  const canvas = recordingState.canvas;
+  const ctx = recordingState.context;
+  if (!canvas || !ctx || !state.recording) return;
+
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.fillStyle = "#0b1118";
+  ctx.fillRect(0, 0, width, height);
+
+  const people = getRecordingPeople();
+  const columns = people.length > 4 ? 3 : 2;
+  const rows = Math.max(1, Math.ceil(people.length / columns));
+  const gap = 8;
+  const tileWidth = (width - gap * (columns + 1)) / columns;
+  const tileHeight = (height - gap * (rows + 1)) / rows;
+
+  people.forEach(function(person, index) {
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    const x = gap + col * (tileWidth + gap);
+    const y = gap + row * (tileHeight + gap);
+
+    ctx.save();
+    roundedRectPath(ctx, x, y, tileWidth, tileHeight, 11);
+    ctx.clip();
+
+    const video = document.querySelector('video.participant-video[data-person-id="' + person.id + '"]');
+    if (video && video.readyState >= 2 && !video.paused && !video.ended && video.videoWidth && video.videoHeight) {
+      const sourceRatio = video.videoWidth / video.videoHeight;
+      const tileRatio = tileWidth / tileHeight;
+      let drawWidth = tileWidth;
+      let drawHeight = tileHeight;
+      let drawX = x;
+      let drawY = y;
+      if (sourceRatio > tileRatio) {
+        drawHeight = tileWidth / sourceRatio;
+        drawY = y + (tileHeight - drawHeight) / 2;
+      } else {
+        drawWidth = tileHeight * sourceRatio;
+        drawX = x + (tileWidth - drawWidth) / 2;
+      }
+      ctx.fillStyle = "#05080d";
+      ctx.fillRect(x, y, tileWidth, tileHeight);
+      ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
+    } else {
+      const livePerson = getParticipant(person.id);
+      drawRecordingAvatar(ctx, livePerson || person, x, y, tileWidth, tileHeight);
+    }
+
+    const gradient = ctx.createLinearGradient(0, y + tileHeight * 0.55, 0, y + tileHeight);
+    gradient.addColorStop(0, "rgba(0,0,0,0)");
+    gradient.addColorStop(1, "rgba(0,0,0,.62)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, tileWidth, tileHeight);
+    ctx.restore();
+
+    drawRecordingLabel(ctx, person, x, y, tileWidth, tileHeight);
+  });
+
+  recordingState.animationFrame = requestAnimationFrame(drawRecordingFrame);
+}
+
+async function syncRecordingAudio() {
+  if (!recordingState.audioContext || !recordingState.audioDestination) return;
+
+  const currentVideos = Array.from(document.querySelectorAll("video.participant-video[data-person-id]"));
+  const currentSet = new Set(currentVideos);
+
+  for (const [video, source] of recordingState.mediaSources.entries()) {
+    if (!currentSet.has(video)) {
+      try { source.disconnect(); } catch (error) {}
+      recordingState.mediaSources.delete(video);
+    }
+  }
+
+  for (const video of currentVideos) {
+    if (recordingState.mediaSources.has(video)) continue;
+    try {
+      const source = recordingState.audioContext.createMediaElementSource(video);
+      source.connect(recordingState.audioDestination);
+      recordingState.mediaSources.set(video, source);
+    } catch (error) {}
+  }
+
+  if (recordingState.audioContext.state === "suspended") {
+    try { await recordingState.audioContext.resume(); } catch (error) {}
+  }
+}
+
+function updateRecordingControls() {
+  document.querySelectorAll('[data-action="toggle-recording"]').forEach(function(button) {
+    button.classList.toggle("recording-active", state.recording);
+    button.innerHTML = icon(state.recording ? "stop" : "record") + '<span>' + (state.recording ? "Stop Recording" : "Record") + '</span>';
+  });
+}
+
+async function startRecording() {
+  if (state.recording || state.page !== "meeting") return;
+  const hasMediaRecorder = typeof MediaRecorder !== "undefined";
+  if (!hasMediaRecorder) {
+    alert("This browser does not support meeting recording.");
+    return;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 1280;
+  canvas.height = 720;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    alert("Could not create the meeting recording canvas.");
+    return;
+  }
+
+  recordingState.canvas = canvas;
+  recordingState.context = context;
+  recordingState.chunks = [];
+  recordingState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  recordingState.audioDestination = recordingState.audioContext.createMediaStreamDestination();
+
+  await syncRecordingAudio();
+  try { await recordingState.audioContext.resume(); } catch (error) {}
+
+  const canvasStream = canvas.captureStream(30);
+  const stream = new MediaStream();
+  const videoTrack = canvasStream.getVideoTracks()[0];
+  if (videoTrack) stream.addTrack(videoTrack);
+  const audioTrack = recordingState.audioDestination.stream.getAudioTracks()[0];
+  if (audioTrack) stream.addTrack(audioTrack);
+
+  const mimeTypes = [
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm"
+  ];
+  const mimeType = mimeTypes.find(function(type) {
+    return MediaRecorder.isTypeSupported(type);
+  }) || "";
+
+  try {
+    recordingState.recorder = mimeType
+      ? new MediaRecorder(stream, { mimeType: mimeType })
+      : new MediaRecorder(stream);
+  } catch (error) {
+    recordingState.recorder = null;
+    alert("Could not start meeting recording in this browser.");
+    return;
+  }
+
+  recordingState.recorder.ondataavailable = function(event) {
+    if (event.data && event.data.size) recordingState.chunks.push(event.data);
+  };
+
+  recordingState.recorder.onstop = async function() {
+    const chunks = recordingState.chunks.slice();
+    const sourceType = recordingState.recorder && recordingState.recorder.mimeType || mimeType || "video/webm";
+    await finishRecording(chunks, sourceType);
+  };
+
+  recordingState.recorder.onerror = function() {
+    state.recording = false;
+    cancelAnimationFrame(recordingState.animationFrame);
+    cleanupRecording();
+    updateRecordingControls();
+    alert("The meeting recording stopped because the browser reported an error.");
+  };
+
+  state.recording = true;
+  updateRecordingControls();
+  drawRecordingFrame();
+  recordingState.recorder.start(1000);
+  syncAudioIndicator();
+}
+
+async function stopRecording() {
+  if (!state.recording || !recordingState.recorder) return;
+  state.recording = false;
+  updateRecordingControls();
+  cancelAnimationFrame(recordingState.animationFrame);
+  try {
+    recordingState.recorder.stop();
+  } catch (error) {
+    cleanupRecording();
+  }
+}
+
+async function finishRecording(chunks, sourceType) {
+  const sourceBlob = new Blob(chunks, { type: sourceType || "video/webm" });
+  try {
+    const ffmpeg = await getRecordingFFmpeg();
+    await ffmpeg.writeFile("meeting.webm", await fetchFile(sourceBlob));
+    await ffmpeg.exec([
+      "-i", "meeting.webm",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "128k",
+      "-movflags", "+faststart",
+      "meeting.mp4"
+    ]);
+    const data = await ffmpeg.readFile("meeting.mp4");
+    const mp4Blob = new Blob([data.buffer], { type: "video/mp4" });
+    const url = URL.createObjectURL(mp4Blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "zoom-copy-meeting-" + new Date().toISOString().replace(/[:.]/g, "-") + ".mp4";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    try { await ffmpeg.deleteFile("meeting.webm"); } catch (error) {}
+    try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
+  } catch (error) {
+    console.error("Meeting recording conversion failed", error);
+    const fallbackUrl = URL.createObjectURL(sourceBlob);
+    const link = document.createElement("a");
+    link.href = fallbackUrl;
+    link.download = "zoom-copy-meeting-recording.webm";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function() { URL.revokeObjectURL(fallbackUrl); }, 60000);
+    alert("MP4 conversion failed in this browser, so the recorded meeting was saved as WebM instead.");
+  } finally {
+    cleanupRecording();
+    updateRecordingControls();
+    syncAudioIndicator();
+  }
+}
+
+async function getRecordingFFmpeg() {
+  if (recordingState.ffmpeg) return recordingState.ffmpeg;
+  if (recordingState.ffmpegLoading) {
+    while (recordingState.ffmpegLoading && !recordingState.ffmpeg) {
+      await new Promise(function(resolve) { setTimeout(resolve, 100); });
+    }
+    if (recordingState.ffmpeg) return recordingState.ffmpeg;
+  }
+
+  recordingState.ffmpegLoading = true;
+  try {
+    const ffmpeg = new FFmpeg();
+    const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
+    await ffmpeg.load({
+      coreURL: await toBlobURL(baseURL + "/ffmpeg-core.js", "text/javascript"),
+      wasmURL: await toBlobURL(baseURL + "/ffmpeg-core.wasm", "application/wasm")
+    });
+    recordingState.ffmpeg = ffmpeg;
+    return ffmpeg;
+  } finally {
+    recordingState.ffmpegLoading = false;
+  }
+}
+
+function cleanupRecording() {
+  if (recordingState.animationFrame) {
+    cancelAnimationFrame(recordingState.animationFrame);
+    recordingState.animationFrame = 0;
+  }
+  if (recordingState.recorder && recordingState.recorder.state !== "inactive") {
+    try { recordingState.recorder.stop(); } catch (error) {}
+  }
+  recordingState.mediaSources.forEach(function(source) {
+    try { source.disconnect(); } catch (error) {}
+  });
+  recordingState.mediaSources.clear();
+  if (recordingState.audioContext) {
+    try { recordingState.audioContext.close(); } catch (error) {}
+  }
+  recordingState.recorder = null;
+  recordingState.audioContext = null;
+  recordingState.audioDestination = null;
+  recordingState.canvas = null;
+  recordingState.context = null;
+  recordingState.chunks = [];
 }
 
 function syncAudioIndicator() {
@@ -783,11 +1138,20 @@ function bind() {
         state.cameraHidden.me = !state.cameraOn;
         updateParticipantTile("me");
         updateParticipantsListOnly();
+        if (state.recording) syncRecordingAudio();
         return;
       }
       if (a === "toggle-participants") state.participantsOpen = !state.participantsOpen;
       if (a === "toggle-chat") state.chatOpen = !state.chatOpen;
       if (a === "toggle-share") state.shareOn = !state.shareOn;
+      if (a === "toggle-recording") {
+        if (state.recording) {
+          stopRecording();
+        } else {
+          startRecording();
+        }
+        return;
+      }
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
         document.querySelectorAll("video.participant-video").forEach(function(v) {
@@ -797,6 +1161,7 @@ function bind() {
           if (!v.muted) v.play().catch(function(){});
         });
         render();
+        if (state.recording) syncRecordingAudio();
         return;
       }
       if (a === "add-person") { openAddPerson(); return; }
