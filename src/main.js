@@ -1295,6 +1295,7 @@ let roomCanvas = null;
 let roomCanvasContext = null;
 let roomDrawTimer = 0;
 let roomPeerGeneration = 0;
+const watchAvatarImages = new Map();
 
 function destroyRoomConnection() {
   roomPeerGeneration += 1;
@@ -1334,9 +1335,71 @@ function getWatchPeople() {
     id: "me",
     name: state.displayName,
     initials: initialsFor(state.displayName),
-    hue: 145
+    hue: 145,
+    avatarUrl: state.myAvatarUrl || null
   };
-  return (state.myParticipantHidden ? [] : [me]).concat(state.fakePeople || []);
+  const fakePeople = (state.fakePeople || []).map(function(person) {
+    return {
+      id: person.id,
+      name: person.name,
+      initials: person.initials || initialsFor(person.name),
+      hue: person.hue,
+      avatarUrl: person.avatarUrl || null
+    };
+  });
+  return (state.myParticipantHidden ? [] : [me]).concat(fakePeople);
+}
+
+function getWatchAvatarImage(person) {
+  const url = person && person.avatarUrl ? String(person.avatarUrl) : "";
+  if (!url) return null;
+
+  let entry = watchAvatarImages.get(person.id);
+  if (!entry || entry.url !== url) {
+    const image = new Image();
+    entry = { url: url, image: image, ready: false };
+    image.onload = function() {
+      entry.ready = true;
+    };
+    image.onerror = function() {
+      entry.ready = false;
+    };
+    watchAvatarImages.set(person.id, entry);
+    image.src = url;
+  }
+
+  return entry.ready ? entry.image : null;
+}
+
+function drawWatchAvatar(ctx, person, centerX, centerY, size) {
+  const image = getWatchAvatarImage(person);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, size / 2, 0, Math.PI * 2);
+  ctx.closePath();
+  ctx.clip();
+
+  if (image) {
+    const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
+    const drawWidth = image.naturalWidth * scale;
+    const drawHeight = image.naturalHeight * scale;
+    ctx.drawImage(image, centerX - drawWidth / 2, centerY - drawHeight / 2, drawWidth, drawHeight);
+  } else {
+    ctx.fillStyle = "hsl(" + (person.hue || 145) + " 38% 30%)";
+    ctx.fillRect(centerX - size / 2, centerY - size / 2, size, size);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "800 " + Math.max(14, Math.round(size * 0.34)) + "px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(person.initials || initialsFor(person.name), centerX, centerY);
+  }
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(255,255,255,.72)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, size / 2 - 1, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function drawWatchFrame() {
@@ -1392,20 +1455,15 @@ function drawWatchFrame() {
     } else {
       ctx.fillStyle = "hsl(" + (person.hue || 145) + " 38% 22%)";
       ctx.fillRect(x, y, tileWidth, tileHeight);
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "800 " + Math.max(24, Math.min(56, tileHeight * 0.24)) + "px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(person.initials || initialsFor(person.name), x + tileWidth / 2, y + tileHeight / 2);
-      ctx.textAlign = "start";
-      ctx.textBaseline = "alphabetic";
+      drawWatchAvatar(ctx, person, x + tileWidth / 2, y + tileHeight / 2 - 8, Math.min(112, tileHeight * 0.44));
     }
 
-    ctx.fillStyle = "rgba(0,0,0,.62)";
-    ctx.fillRect(x, y + tileHeight - 34, tileWidth, 34);
+    ctx.fillStyle = "rgba(0,0,0,.68)";
+    ctx.fillRect(x, y + tileHeight - 40, tileWidth, 40);
+    drawWatchAvatar(ctx, person, x + 25, y + tileHeight - 20, 27);
     ctx.fillStyle = "#ffffff";
     ctx.font = "700 13px system-ui, sans-serif";
-    ctx.fillText(person.name || "Participant", x + 10, y + tileHeight - 12);
+    ctx.fillText(person.name || "Participant", x + 46, y + tileHeight - 15);
   });
 
   if (people.length === 0) {
