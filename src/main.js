@@ -27,7 +27,9 @@ const state = {
     { id: "jamie", name: "Jamie Lee", role: "", initials: "JL", hue: 280 },
     { id: "sam", name: "Sam Rivera", role: "", initials: "SR", hue: 35 }
   ],
-  selectedVideo: null
+  selectedVideo: null,
+  cameraHidden: {},
+  keybinds: {}
 };
 
 const icons = {
@@ -68,6 +70,45 @@ function initialsFor(name) {
 
 function revokeBlob(url) {
   if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
+function getParticipant(personId) {
+  if (personId === "me") {
+    return {
+      id: "me",
+      name: state.displayName,
+      initials: initialsFor(state.displayName),
+      hue: 145,
+      videoUrl: state.selectedVideo,
+      cameraVisible: !state.cameraHidden.me
+    };
+  }
+  return state.fakePeople.find(function(p) { return p.id === personId; }) || null;
+}
+
+function togglePersonCamera(personId) {
+  if (personId === "me") {
+    state.cameraHidden.me = !state.cameraHidden.me;
+    state.cameraOn = !state.cameraHidden.me;
+    return;
+  }
+  const person = getParticipant(personId);
+  if (!person) return;
+  person.cameraVisible = person.cameraVisible === false ? true : false;
+}
+
+function setPersonKeybind(personId, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  if (normalized.length !== 1 || !/^[a-z0-9]$/i.test(normalized)) {
+    if (personId === "me") delete state.keybinds.me;
+    else delete state.keybinds[personId];
+    return;
+  }
+
+  Object.keys(state.keybinds).forEach(function(id) {
+    if (id !== personId && state.keybinds[id] === normalized) delete state.keybinds[id];
+  });
+  state.keybinds[personId] = normalized;
 }
 
 function render() {
@@ -120,7 +161,8 @@ function renderSettings() {
 
 function participantTile(person) {
   const isMe = person.id === "me";
-  const showVideo = person.videoUrl && (!isMe || state.cameraOn);
+  const showVideo = person.videoUrl && (!isMe || state.cameraOn) && (person.cameraVisible !== false);
+  const keybind = state.keybinds[person.id];
   const media = showVideo
     ? '<video class="participant-video" src="' + person.videoUrl + '" autoplay muted loop playsinline></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '"><span>' + person.initials + '</span></div>';
@@ -152,7 +194,9 @@ function renderParticipants() {
     '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>Host · You' + (state.selectedVideo ? ' · Fake camera' : '') + '</span></div><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + optional video</small></button><div class="participant-list">' +
     state.fakePeople.map(function(p){
-      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + (p.role || "Participant") + (p.videoUrl ? " · Video file" : " · No camera") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon("mic") + icon(p.videoUrl ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      const cameraText = p.videoUrl ? (p.cameraVisible === false ? " · Camera hidden" : " · Video file") : " · No camera";
+      const keyText = state.keybinds[p.id] ? " · Key " + state.keybinds[p.id].toUpperCase() : "";
+      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + escapeHtml(p.initials) + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + (p.role || "Participant") + cameraText + keyText + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon("mic") + icon(p.videoUrl && p.cameraVisible !== false ? "video" : "videoOff") + '</div><button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
@@ -167,32 +211,40 @@ function openAddPerson() {
 }
 
 function openParticipantEditor(personId) {
+  const isNew = personId === null;
   const isMe = personId === "me";
-  const person = isMe
-    ? { id: "me", name: state.displayName, initials: initialsFor(state.displayName), hue: 145, videoUrl: state.selectedVideo }
-    : state.fakePeople.find(function(p) { return p.id === personId; });
+  const existing = !isNew && getParticipant(personId);
+  const person = isNew
+    ? { id: null, name: "", initials: "GU", hue: Math.floor(Math.random() * 360), videoUrl: null, cameraVisible: true }
+    : existing;
 
   if (!person) return;
 
+  const currentKey = isNew ? "" : (state.keybinds[personId] || "");
   const modal = document.createElement("div");
   modal.className = "modal-backdrop";
   modal.innerHTML =
     '<form class="modal">' +
       '<button type="button" class="modal-close" data-close>×</button>' +
-      '<span class="eyebrow">' + (isMe ? "Your participant" : "Fake participant") + '</span>' +
-      '<h2>' + (isMe ? "Edit your meeting identity" : "Edit fake person") + '</h2>' +
-      '<p class="muted">' + (isMe ? "Change your name and your simulated camera video." : "Change the name and fake camera video for this participant.") + '</p>' +
+      '<span class="eyebrow">' + (isNew ? "Participants" : (isMe ? "Your participant" : "Fake participant")) + '</span>' +
+      '<h2>' + (isNew ? "Add a fake person" : (isMe ? "Edit your meeting identity" : "Edit fake person")) + '</h2>' +
+      '<p class="muted">' + (isNew ? "Create a fake participant with an optional local video and camera keybind." : "Change the name, fake camera, or keyboard shortcut for this participant.") + '</p>' +
       '<label class="field-label">Display name<input name="name" required maxlength="28" value="' + escapeHtml(person.name) + '" placeholder="Taylor Kim" autofocus></label>' +
       '<label class="field-label">Fake camera video<input name="video" type="file" accept="video/*"></label>' +
-      '<div class="file-help">' + (person.videoUrl ? "A video is already assigned. Pick another file to replace it." : "No video is assigned. Pick a file to give this participant a fake camera.") + '</div>' +
+      '<div class="file-help">' + (person.videoUrl ? "A video is already assigned. Pick another file to replace it." : "Pick a video file to use as this participant’s fake camera.") + '</div>' +
+      '<label class="field-label">Camera keybind<input name="keybind" class="keybind-input" value="' + escapeHtml(currentKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
+      '<div class="file-help">Press the assigned key during the meeting to show or hide this person’s camera. Use one letter or number.</div>' +
       '<label class="check-row"><input name="clearVideo" type="checkbox"><span>Remove current fake camera</span></label>' +
+      (!isNew && !isMe ? '<div class="edit-camera-action"><button type="button" class="secondary" data-toggle-camera>' + (person.cameraVisible === false ? "Show camera now" : "Hide camera now") + '</button></div>' : '') +
       '<div class="modal-actions">' +
-        (isMe ? '' : '<button type="button" class="danger-secondary" data-remove>Remove person</button>') +
-        '<span class="modal-spacer"></span><button type="button" class="secondary" data-close>Cancel</button><button class="primary" type="submit">Save changes</button>' +
+        ((!isNew && !isMe) ? '<button type="button" class="danger-secondary" data-remove>Remove person</button>' : '') +
+        '<span class="modal-spacer"></span><button type="button" class="secondary" data-close>Cancel</button><button class="primary" type="submit">' + (isNew ? "Add person" : "Save changes") + '</button>' +
       '</div>' +
     '</form>';
 
   document.body.appendChild(modal);
+  const form = modal.querySelector("form");
+  const keyInput = form.querySelector('[name="keybind"]');
 
   modal.querySelectorAll("[data-close]").forEach(function(b) {
     b.addEventListener("click", function() { modal.remove(); });
@@ -202,6 +254,14 @@ function openParticipantEditor(personId) {
     if (e.target === modal) modal.remove();
   });
 
+  const toggleCameraButton = modal.querySelector("[data-toggle-camera]");
+  if (toggleCameraButton) {
+    toggleCameraButton.addEventListener("click", function() {
+      togglePersonCamera(personId);
+      toggleCameraButton.textContent = getParticipant(personId).cameraVisible === false ? "Show camera now" : "Hide camera now";
+    });
+  }
+
   const removeButton = modal.querySelector("[data-remove]");
   if (removeButton) {
     removeButton.addEventListener("click", function() {
@@ -210,38 +270,85 @@ function openParticipantEditor(personId) {
         revokeBlob(state.fakePeople[index].videoUrl);
         state.fakePeople.splice(index, 1);
       }
+      delete state.keybinds[personId];
+      delete state.cameraHidden[personId];
       modal.remove();
-      render();
+      
+window.addEventListener("keydown", function(e) {
+  if (state.page !== "meeting") return;
+  const tag = e.target && e.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || e.isComposing) return;
+  const key = String(e.key || "").toLowerCase();
+  if (!/^[a-z0-9]$/.test(key)) return;
+
+  const personId = Object.keys(state.keybinds).find(function(id) {
+    return state.keybinds[id] === key;
+  });
+  if (!personId) return;
+
+  e.preventDefault();
+  togglePersonCamera(personId);
+  render();
+});
+
+render();
     });
   }
 
-  modal.querySelector("form").addEventListener("submit", function(e) {
+  if (keyInput) {
+    keyInput.addEventListener("keydown", function(e) {
+      if (["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+      e.preventDefault();
+      if (e.key === "Backspace" || e.key === "Delete" || e.key === "Escape") {
+        keyInput.value = "";
+        return;
+      }
+      if (/^[a-z0-9]$/i.test(e.key)) keyInput.value = e.key.toUpperCase();
+    });
+    keyInput.addEventListener("focus", function() { keyInput.select(); });
+  }
+
+  form.addEventListener("submit", function(e) {
     e.preventDefault();
 
-    const fd = new FormData(e.currentTarget);
+    const fd = new FormData(form);
     const name = String(fd.get("name") || "").trim() || "Guest";
     const file = fd.get("video");
-    const clearVideo = e.currentTarget.querySelector('[name="clearVideo"]').checked;
+    const clearVideo = form.querySelector('[name="clearVideo"]').checked;
+    const key = String(fd.get("keybind") || "").trim();
 
-    if (isMe) {
+    if (isNew) {
+      const person = {
+        id: crypto.randomUUID(),
+        name: name,
+        role: "",
+        initials: initialsFor(name),
+        hue: Math.floor(Math.random() * 360),
+        cameraVisible: true
+      };
+      if (file instanceof File && file.size) person.videoUrl = URL.createObjectURL(file);
+      else person.videoUrl = null;
+      state.fakePeople.push(person);
+      setPersonKeybind(person.id, key);
+    } else if (isMe) {
       state.displayName = name;
-
       if (clearVideo) {
         revokeBlob(state.selectedVideo);
         state.selectedVideo = null;
         state.cameraOn = false;
+        state.cameraHidden.me = true;
       } else if (file instanceof File && file.size) {
         revokeBlob(state.selectedVideo);
         state.selectedVideo = URL.createObjectURL(file);
         state.cameraOn = true;
+        state.cameraHidden.me = false;
       }
+      setPersonKeybind("me", key);
     } else {
       const target = state.fakePeople.find(function(p) { return p.id === personId; });
       if (!target) return;
-
       target.name = name;
       target.initials = initialsFor(name);
-
       if (clearVideo) {
         revokeBlob(target.videoUrl);
         target.videoUrl = null;
@@ -249,13 +356,14 @@ function openParticipantEditor(personId) {
         revokeBlob(target.videoUrl);
         target.videoUrl = URL.createObjectURL(file);
       }
+      setPersonKeybind(personId, key);
     }
 
     modal.remove();
     render();
   });
 
-  const nameInput = modal.querySelector('[name="name"]');
+  const nameInput = form.querySelector('[name="name"]');
   nameInput.focus();
   nameInput.select();
 }
@@ -270,6 +378,7 @@ function openFakeCameraPicker() {
     revokeBlob(state.selectedVideo);
     state.selectedVideo = URL.createObjectURL(file);
     state.cameraOn = true;
+    state.cameraHidden.me = false;
     render();
   };
   input.click();
