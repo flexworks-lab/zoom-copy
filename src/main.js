@@ -1515,6 +1515,7 @@ function renderVideoPlaylist(person) {
       '<div class="video-order-actions">' +
         '<button type="button" class="video-order-button" data-move-video="up" data-video-index="' + i + '"' + (isFirst ? ' disabled' : '') + ' aria-label="Move video up">↑</button>' +
         '<button type="button" class="video-order-button" data-move-video="down" data-video-index="' + i + '"' + (isLast ? ' disabled' : '') + ' aria-label="Move video down">↓</button>' +
+        '<button type="button" class="video-delete-button" data-delete-video="' + i + '" aria-label="Delete video">Delete</button>' +
       '</div>' +
     '</div>';
   }).join("");
@@ -1544,6 +1545,46 @@ function reorderParticipantVideo(personId, fromIndex, direction) {
   } else if (toIndex <= currentIndex && currentIndex < fromIndex) {
     if (person.id === "me") state.myVideoIndex = currentIndex + 1;
     else person.currentVideoIndex = currentIndex + 1;
+  }
+
+  queueMeetingSave();
+  return true;
+}
+
+function deleteParticipantVideo(personId, videoIndex) {
+  const person = getParticipant(personId);
+  if (!person) return false;
+
+  const videos = person.id === "me" ? state.myVideos : person.videos;
+  if (!Array.isArray(videos) || videoIndex < 0 || videoIndex >= videos.length) return false;
+
+  const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
+  const removed = videos.splice(videoIndex, 1)[0];
+  if (removed && removed.url) revokeBlob(removed.url);
+
+  if (!videos.length) {
+    if (person.id === "me") {
+      state.myVideoIndex = 0;
+      state.cameraOn = false;
+      state.cameraHidden.me = true;
+      state.needsNextOnCamera = false;
+    } else {
+      person.currentVideoIndex = 0;
+      person.cameraVisible = false;
+      person.needsNextOnCamera = false;
+    }
+    state.clipPaused[person.id] = false;
+  } else {
+    const nextIndex = videoIndex < currentIndex
+      ? currentIndex - 1
+      : Math.min(currentIndex, videos.length - 1);
+
+    if (person.id === "me") state.myVideoIndex = nextIndex;
+    else person.currentVideoIndex = nextIndex;
+
+    if (videoIndex === currentIndex) {
+      state.clipPaused[person.id] = false;
+    }
   }
 
   queueMeetingSave();
@@ -1826,6 +1867,15 @@ function openParticipantEditor(personId) {
     }
   });
 
+  function refreshVideoPlaylist() {
+    const playlist = modal.querySelector(".video-playlist");
+    const updatedPerson = getParticipant(personId);
+    if (playlist && updatedPerson) {
+      playlist.innerHTML = renderVideoPlaylist(updatedPerson);
+      wireVideoOrderButtons();
+    }
+  }
+
   function wireVideoOrderButtons() {
     modal.querySelectorAll("[data-move-video]").forEach(function(button) {
       button.addEventListener("click", function handleMoveClick() {
@@ -1833,13 +1883,16 @@ function openParticipantEditor(personId) {
         const direction = button.dataset.moveVideo;
         if (!Number.isInteger(fromIndex)) return;
         if (!reorderParticipantVideo(personId, fromIndex, direction)) return;
+        refreshVideoPlaylist();
+      });
+    });
 
-        const playlist = modal.querySelector(".video-playlist");
-        const updatedPerson = getParticipant(personId);
-        if (playlist && updatedPerson) {
-          playlist.innerHTML = renderVideoPlaylist(updatedPerson);
-          wireVideoOrderButtons();
-        }
+    modal.querySelectorAll("[data-delete-video]").forEach(function(button) {
+      button.addEventListener("click", function handleDeleteClick() {
+        const videoIndex = Number(button.dataset.deleteVideo);
+        if (!Number.isInteger(videoIndex)) return;
+        if (!deleteParticipantVideo(personId, videoIndex)) return;
+        refreshVideoPlaylist();
       });
     });
   }
