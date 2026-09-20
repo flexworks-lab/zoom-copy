@@ -41,6 +41,9 @@ const state = {
   audioKeybinds: {},
   leaveKeybinds: {},
   pauseKeybinds: {},
+  restartKeybinds: {},
+  pauseAllKeybind: "p",
+  clipPaused: {},
   leaveHistory: [],
   myAudioOn: true,
   audioEnabled: true,
@@ -108,9 +111,11 @@ function capturePersistentPlaybackState() {
   const playback = {};
   document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
     const personId = video.dataset.personId;
+    const paused = Boolean(video.paused || state.clipPaused[personId]);
+    state.clipPaused[personId] = paused;
     playback[personId] = {
       currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
-      wasPaused: video.paused
+      wasPaused: paused
     };
   });
   return playback;
@@ -179,6 +184,9 @@ async function buildSavedMeetingState() {
     audioKeybinds: cloneValue(state.audioKeybinds) || {},
     leaveKeybinds: cloneValue(state.leaveKeybinds) || {},
     pauseKeybinds: cloneValue(state.pauseKeybinds) || {},
+    restartKeybinds: cloneValue(state.restartKeybinds) || {},
+    pauseAllKeybind: state.pauseAllKeybind || "p",
+    clipPaused: cloneValue(state.clipPaused) || {},
     myAudioOn: state.myAudioOn,
     audioEnabled: state.audioEnabled,
     recordingNumber: state.recordingNumber,
@@ -338,6 +346,9 @@ function restoreMeetingRecord(record) {
   state.audioKeybinds = saved.audioKeybinds || {};
   state.leaveKeybinds = saved.leaveKeybinds || {};
   state.pauseKeybinds = saved.pauseKeybinds || {};
+  state.restartKeybinds = saved.restartKeybinds || {};
+  state.pauseAllKeybind = saved.pauseAllKeybind || "p";
+  state.clipPaused = saved.clipPaused || {};
   state.myAudioOn = saved.myAudioOn !== false;
   state.audioEnabled = saved.audioEnabled !== false;
   state.recordingNumber = Number(saved.recordingNumber) || 0;
@@ -804,6 +815,21 @@ function setPauseKeybind(personId, key) {
   state.pauseKeybinds[personId] = normalized;
 }
 
+function setRestartKeybind(personId, key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  delete state.restartKeybinds[personId];
+  if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
+  Object.keys(state.restartKeybinds).forEach(function(id) {
+    if (id !== personId && state.restartKeybinds[id] === normalized) delete state.restartKeybinds[id];
+  });
+  state.restartKeybinds[personId] = normalized;
+}
+
+function setPauseAllKeybind(key) {
+  const normalized = String(key || "").trim().toLowerCase();
+  state.pauseAllKeybind = /^[a-z0-9]$/i.test(normalized) && normalized !== "0" ? normalized : "";
+}
+
 const leaveSound = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
 leaveSound.preload = "auto";
 leaveSound.volume = 0.74;
@@ -863,7 +889,8 @@ function leaveMeetingAsMe() {
       next: state.nextKeybinds.me || "",
       audio: state.audioKeybinds.me || "",
       leave: state.leaveKeybinds.me || "",
-      pause: state.pauseKeybinds.me || ""
+      pause: state.pauseKeybinds.me || "",
+      restart: state.restartKeybinds.me || ""
     }
   });
   if (state.leaveHistory.length > 50) state.leaveHistory.shift();
@@ -899,7 +926,8 @@ function leavePerson(personId) {
       next: state.nextKeybinds[personId] || "",
       audio: state.audioKeybinds[personId] || "",
       leave: state.leaveKeybinds[personId] || "",
-      pause: state.pauseKeybinds[personId] || ""
+      pause: state.pauseKeybinds[personId] || "",
+      restart: state.restartKeybinds[personId] || ""
     }
   });
   if (state.leaveHistory.length > 50) state.leaveHistory.shift();
@@ -948,6 +976,7 @@ function undoLastLeave() {
     setAudioKeybind("me", snapshot.keybinds.audio);
     setLeaveKeybind("me", snapshot.keybinds.leave);
     setPauseKeybind("me", snapshot.keybinds.pause);
+    setRestartKeybind("me", snapshot.keybinds.restart);
   } else if (snapshot.type === "fake" && snapshot.person) {
     if (!state.fakePeople.some(function(p) { return p.id === snapshot.person.id; })) {
       state.fakePeople.push(snapshot.person);
@@ -959,6 +988,7 @@ function undoLastLeave() {
       setAudioKeybind(snapshot.person.id, snapshot.keybinds.audio);
       setLeaveKeybind(snapshot.person.id, snapshot.keybinds.leave);
       setPauseKeybind(snapshot.person.id, snapshot.keybinds.pause);
+      setRestartKeybind(snapshot.person.id, snapshot.keybinds.restart);
     }
 
     if (snapshot.hostIdBeforeLeave === snapshot.person.id) {
@@ -1013,6 +1043,7 @@ function joinBackParticipant(personId) {
   setAudioKeybind(person.id, snapshot.keybinds?.audio);
   setLeaveKeybind(person.id, snapshot.keybinds?.leave);
   setPauseKeybind(person.id, snapshot.keybinds?.pause);
+  setRestartKeybind(person.id, snapshot.keybinds?.restart);
 
   if (snapshot.hostIdBeforeLeave === person.id) {
     state.hostId = person.id;
@@ -1168,24 +1199,45 @@ function updateClipControlLabels(personId) {
   const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
   if (!tile) return;
   const video = tile.querySelector("video.participant-video");
+  const paused = state.clipPaused[personId] === true || !video || video.paused;
   tile.querySelectorAll('[data-action="toggle-clip"][data-person-id="' + personId + '"]').forEach(function(button) {
-    const paused = !video || video.paused;
     button.innerHTML = icon(paused ? "play" : "pause") + '<span>' + (paused ? "Play clip" : "Pause clip") + '</span>';
   });
+}
+
+function getParticipantVideoElement(personId) {
+  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
+  return tile && tile.querySelector("video.participant-video");
+}
+
+function ensureParticipantCameraVisible(personId) {
+  const person = getParticipant(personId);
+  if (!person) return false;
+
+  if (personId === "me") {
+    state.myParticipantHidden = false;
+    state.cameraHidden.me = false;
+    state.cameraOn = true;
+  } else {
+    person.cameraVisible = true;
+  }
+
+  return true;
 }
 
 function restartPersonClip(personId) {
   const person = getParticipant(personId);
   if (!person || !getCurrentVideoUrl(person)) return false;
 
-  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
-  const video = tile && tile.querySelector("video.participant-video");
+  state.clipPaused[personId] = false;
+  ensureParticipantCameraVisible(personId);
+  render();
+
+  const video = getParticipantVideoElement(personId);
   if (!video) return false;
 
   const start = function() {
-    try {
-      video.currentTime = 0;
-    } catch (error) {}
+    try { video.currentTime = 0; } catch (error) {}
     video.play().catch(function() {});
     updateClipControlLabels(personId);
     syncAudioIndicator();
@@ -1201,20 +1253,53 @@ function togglePersonClip(personId) {
   const person = getParticipant(personId);
   if (!person || !getCurrentVideoUrl(person)) return false;
 
-  const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
-  const video = tile && tile.querySelector("video.participant-video");
-  if (!video) return false;
+  const video = getParticipantVideoElement(personId);
 
-  if (video.paused || video.ended) {
+  if (!video) {
+    if (state.myParticipantHidden && personId === "me") {
+      state.myParticipantHidden = false;
+      render();
+      return togglePersonClip(personId);
+    }
+    state.clipPaused[personId] = true;
+    queueMeetingSave();
+    return true;
+  }
+
+  if (video.ended) {
+    try { video.currentTime = 0; } catch (error) {}
+    state.clipPaused[personId] = false;
+    video.play().catch(function() {});
+  } else if (video.paused || state.clipPaused[personId]) {
+    state.clipPaused[personId] = false;
     video.play().catch(function() {});
   } else {
+    state.clipPaused[personId] = true;
     video.pause();
   }
+
   updateClipControlLabels(personId);
   syncAudioIndicator();
   queueMeetingSave();
   return true;
 }
+
+function pauseAllVideos() {
+  getRecordingPeople().forEach(function(person) {
+    if (getVideos(person).length) state.clipPaused[person.id] = true;
+  });
+
+  document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
+    state.clipPaused[video.dataset.personId] = true;
+    try { video.pause(); } catch (error) {}
+    updateClipControlLabels(video.dataset.personId);
+  });
+
+  syncAudioIndicator();
+  queueMeetingSave();
+  return true;
+}
+
 
 function participantTile(person) {
   const videoUrl = getCurrentVideoUrl(person);
@@ -1230,12 +1315,14 @@ function participantTile(person) {
   const audioKey = state.audioKeybinds[person.id] || "—";
   const leaveKey = state.leaveKeybinds[person.id] || "—";
   const pauseKey = state.pauseKeybinds[person.id] || "—";
+  const restartKey = state.restartKeybinds[person.id] || "—";
   const keybindBadges =
     '<span class="keybind-badge">Cam:' + escapeHtml(cameraKey.toUpperCase()) + '</span>' +
     '<span class="next-key-badge">Next:' + escapeHtml(nextKey.toUpperCase()) + '</span>' +
     '<span class="audio-key-badge">Audio:' + escapeHtml(audioKey.toUpperCase()) + '</span>' +
     '<span class="leave-key-badge">Leave:' + escapeHtml(leaveKey.toUpperCase()) + '</span>' +
-    '<span class="pause-key-badge">Pause:' + escapeHtml(pauseKey.toUpperCase()) + '</span>';
+    '<span class="pause-key-badge">Pause:' + escapeHtml(pauseKey.toUpperCase()) + '</span>' +
+    '<span class="restart-key-badge">Restart:' + escapeHtml(restartKey.toUpperCase()) + '</span>';
 
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
@@ -2897,6 +2984,21 @@ window.addEventListener("keydown", function(e) {
   if (leavePersonId) {
     e.preventDefault();
     leavePerson(leavePersonId);
+    return;
+  }
+
+  if (state.pauseAllKeybind && state.pauseAllKeybind === key) {
+    e.preventDefault();
+    pauseAllVideos();
+    return;
+  }
+
+  const restartPersonId = Object.keys(state.restartKeybinds).find(function(id) {
+    return state.restartKeybinds[id] === key;
+  });
+  if (restartPersonId) {
+    e.preventDefault();
+    restartPersonClip(restartPersonId);
     return;
   }
 
