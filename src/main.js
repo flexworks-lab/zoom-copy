@@ -522,7 +522,7 @@ async function openSavedMeeting(meetingId) {
   }
 }
 
-function saveMeetingState() {
+async function saveMeetingState() {
   if (restoringMeeting || !state.meetingStarted) return;
   if (meetingSaveInProgress) {
     meetingSaveQueued = true;
