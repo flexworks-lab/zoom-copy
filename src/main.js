@@ -844,24 +844,76 @@ function drawRecordingFrame() {
 
   const width = canvas.width;
   const height = canvas.height;
-  ctx.fillStyle = "#0b1118";
+  const topBar = 52;
+  const bottomBar = 68;
+  const panelWidth = state.participantsOpen || state.chatOpen ? 286 : 0;
+  const stageX = 0;
+  const stageY = topBar;
+  const stageWidth = width - panelWidth;
+  const stageHeight = height - topBar - bottomBar;
+
+  ctx.fillStyle = "#111820";
   ctx.fillRect(0, 0, width, height);
 
+  // Meeting top bar.
+  ctx.fillStyle = "#18212b";
+  ctx.fillRect(0, 0, width, topBar);
+  ctx.fillStyle = "#44d585";
+  ctx.beginPath();
+  ctx.arc(20, 22, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 14px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("Product sync", 32, 17);
+  ctx.fillStyle = "#95a4b4";
+  ctx.font = "10px system-ui, sans-serif";
+  ctx.fillText("Meeting ID: " + state.meetingId, 32, 34);
+
+  const topButtons = [
+    state.audioEnabled ? "Video audio on" : "Enable video audio",
+    "Security",
+    "View"
+  ];
+  let bx = width - panelWidth - 305;
+  topButtons.forEach(function(label) {
+    const textWidth = ctx.measureText(label).width;
+    const w = textWidth + 22;
+    ctx.fillStyle = "rgba(255,255,255,.07)";
+    roundedRectPath(ctx, bx, 10, w, 31, 8);
+    ctx.fill();
+    ctx.fillStyle = "#d5dde5";
+    ctx.font = "10px system-ui, sans-serif";
+    ctx.fillText(label, bx + 11, 25);
+    bx += w + 7;
+  });
+  ctx.fillStyle = "rgba(255,255,255,.07)";
+  roundedRectPath(ctx, width - panelWidth - 35, 10, 25, 31, 8);
+  ctx.fill();
+  ctx.fillStyle = "#d5dde5";
+  ctx.font = "800 14px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("•••", width - panelWidth - 22, 25);
+
+  // Participant stage.
   const people = getRecordingPeople();
   const columns = people.length > 4 ? 3 : 2;
   const rows = Math.max(1, Math.ceil(people.length / columns));
-  const gap = 8;
-  const tileWidth = (width - gap * (columns + 1)) / columns;
-  const tileHeight = (height - gap * (rows + 1)) / rows;
+  const gap = 7;
+  const stagePad = 12;
+  const tileWidth = (stageWidth - stagePad * 2 - gap * (columns - 1)) / columns;
+  const tileHeight = (stageHeight - stagePad * 2 - gap * (rows - 1)) / rows;
 
   people.forEach(function(person, index) {
     const col = index % columns;
     const row = Math.floor(index / columns);
-    const x = gap + col * (tileWidth + gap);
-    const y = gap + row * (tileHeight + gap);
+    const x = stageX + stagePad + col * (tileWidth + gap);
+    const y = stageY + stagePad + row * (tileHeight + gap);
 
     ctx.save();
-    roundedRectPath(ctx, x, y, tileWidth, tileHeight, 11);
+    roundedRectPath(ctx, x, y, tileWidth, tileHeight, 10);
     ctx.clip();
 
     const video = document.querySelector('video.participant-video[data-person-id="' + person.id + '"]');
@@ -872,6 +924,8 @@ function drawRecordingFrame() {
       let drawHeight = tileHeight;
       let drawX = x;
       let drawY = y;
+      ctx.fillStyle = "#05080d";
+      ctx.fillRect(x, y, tileWidth, tileHeight);
       if (sourceRatio > tileRatio) {
         drawHeight = tileWidth / sourceRatio;
         drawY = y + (tileHeight - drawHeight) / 2;
@@ -879,8 +933,6 @@ function drawRecordingFrame() {
         drawWidth = tileHeight * sourceRatio;
         drawX = x + (tileWidth - drawWidth) / 2;
       }
-      ctx.fillStyle = "#05080d";
-      ctx.fillRect(x, y, tileWidth, tileHeight);
       ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
     } else {
       const livePerson = getParticipant(person.id);
@@ -894,8 +946,183 @@ function drawRecordingFrame() {
     ctx.fillRect(x, y, tileWidth, tileHeight);
     ctx.restore();
 
+    // Keep the normal participant name/status visible, but do not record
+    // Cam key, Next key, Audio key badges, or the Edit button.
     drawRecordingLabel(ctx, person, x, y, tileWidth, tileHeight);
+
+    if (!isCameraVisible(getParticipant(person.id))) {
+      ctx.fillStyle = "rgba(220,62,72,.82)";
+      roundedRectPath(ctx, x + 10, y + 10, 58, 21, 6);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "900 8px system-ui, sans-serif";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText("CAM OFF", x + 18, y + 20.5);
+    }
   });
+
+  // Side panel: show the normal participant/chat content, but omit Edit controls.
+  if (panelWidth) {
+    const px = stageWidth;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(px, topBar, panelWidth, height - topBar - bottomBar);
+    ctx.strokeStyle = "#dfe4ea";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, topBar, panelWidth, height - topBar - bottomBar);
+
+    if (state.participantsOpen) {
+      ctx.fillStyle = "#1b2632";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
+      ctx.font = "700 13px system-ui, sans-serif";
+      ctx.fillText("Participants", px + 16, topBar + 23);
+      ctx.fillStyle = "#8c97a3";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.fillText((state.fakePeople.length + 1) + " in meeting", px + 16, topBar + 39);
+
+      let py = topBar + 55;
+      ctx.fillStyle = "#fafbfd";
+      roundedRectPath(ctx, px + 14, py, panelWidth - 28, 50, 10);
+      ctx.fill();
+      ctx.strokeStyle = "#e5e9ef";
+      ctx.stroke();
+      ctx.fillStyle = "#1b2632";
+      ctx.font = "700 11px system-ui, sans-serif";
+      ctx.fillText(state.displayName, px + 60, py + 21);
+      ctx.fillStyle = "#8e98a4";
+      ctx.font = "9px system-ui, sans-serif";
+      ctx.fillText("You · " + (state.myVideos.length || 0) + " video" + (state.myVideos.length === 1 ? "" : "s") + (state.myAudioOn ? " · Audio on" : " · Audio off"), px + 60, py + 36);
+
+      py += 60;
+      ctx.fillStyle = "#f7faff";
+      roundedRectPath(ctx, px + 14, py, panelWidth - 28, 45, 10);
+      ctx.fill();
+      ctx.strokeStyle = "#bfcad6";
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#247cdc";
+      ctx.font = "800 18px system-ui, sans-serif";
+      ctx.fillText("+", px + 25, py + 27);
+      ctx.fillStyle = "#1b2632";
+      ctx.font = "700 11px system-ui, sans-serif";
+      ctx.fillText("Add fake person", px + 50, py + 20);
+      ctx.fillStyle = "#8893a0";
+      ctx.font = "9px system-ui, sans-serif";
+      ctx.fillText("Custom name + multiple videos", px + 50, py + 33);
+
+      py += 56;
+      state.fakePeople.forEach(function(person) {
+        const initials = person.initials || initialsFor(person.name);
+        ctx.fillStyle = "hsl(" + person.hue + ",65%,45%)";
+        roundedRectPath(ctx, px + 15, py, 32, 32, 9);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "800 10px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(initials, px + 31, py + 16);
+
+        ctx.textAlign = "left";
+        ctx.fillStyle = "#1b2632";
+        ctx.font = "700 10px system-ui, sans-serif";
+        ctx.fillText(person.name, px + 55, py + 12);
+        ctx.fillStyle = "#8e98a4";
+        ctx.font = "8px system-ui, sans-serif";
+        const hostText = person.id === state.hostId ? "Host" : "Participant";
+        const mediaText = getVideos(person).length ? (person.cameraVisible === false ? " · Camera hidden" : " · " + getVideos(person).length + " video" + (getVideos(person).length === 1 ? "" : "s")) : " · No camera";
+        const audioText = person.audioOn === false ? " · Muted" : "";
+        ctx.fillText(hostText + mediaText + audioText, px + 55, py + 25);
+        py += 40;
+      });
+    } else if (state.chatOpen) {
+      ctx.fillStyle = "#1b2632";
+      ctx.textAlign = "left";
+      ctx.font = "700 13px system-ui, sans-serif";
+      ctx.fillText("Meeting Chat", px + 16, topBar + 23);
+      ctx.fillStyle = "#8c97a3";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.fillText("Everyone", px + 16, topBar + 39);
+
+      ctx.fillStyle = "#586779";
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.fillText("Jamie Lee", px + 16, topBar + 78);
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.fillText("Ready when you are.", px + 16, topBar + 96);
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.fillText("Sam Rivera", px + 16, topBar + 134);
+      ctx.font = "11px system-ui, sans-serif";
+      ctx.fillText("I added the notes to the agenda.", px + 16, topBar + 152);
+      ctx.strokeStyle = "#e9edf1";
+      ctx.beginPath();
+      ctx.moveTo(px, height - bottomBar - 48);
+      ctx.lineTo(width, height - bottomBar - 48);
+      ctx.stroke();
+      ctx.fillStyle = "#fbfcfe";
+      ctx.fillRect(px + 12, height - bottomBar - 36, panelWidth - 92, 28);
+      ctx.strokeStyle = "#dfe5eb";
+      ctx.strokeRect(px + 12, height - bottomBar - 36, panelWidth - 92, 28);
+      ctx.fillStyle = "#8c97a3";
+      ctx.font = "9px system-ui, sans-serif";
+      ctx.fillText("Type a message...", px + 20, height - bottomBar - 19);
+      ctx.fillStyle = "#2d8cff";
+      roundedRectPath(ctx, width - 70, height - bottomBar - 36, 52, 28, 8);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "800 9px system-ui, sans-serif";
+      ctx.fillText("Send", width - 58, height - bottomBar - 19);
+    }
+  }
+
+  // Bottom meeting controls.
+  const cy = height - bottomBar;
+  ctx.fillStyle = "#18212b";
+  ctx.fillRect(0, cy, width, bottomBar);
+  ctx.strokeStyle = "rgba(255,255,255,.08)";
+  ctx.beginPath();
+  ctx.moveTo(0, cy);
+  ctx.lineTo(width, cy);
+  ctx.stroke();
+
+  const controlItems = [
+    {label: state.micOn ? "Mute" : "Unmute", x: 36, icon: state.micOn ? "mic" : "micOff"},
+    {label: state.cameraOn ? "Stop Video" : "Start Video", x: 108, icon: state.cameraOn ? "video" : "videoOff"},
+    {label: "Fake Camera", x: 184, icon: "video"},
+    {label: "Participants " + people.length, x: 274, icon: "users"},
+    {label: "Chat", x: 370, icon: "chat"},
+    {label: state.shareOn ? "Stop Share" : "Share Screen", x: 442, icon: "share"},
+    {label: state.recording ? "Stop Recording" : "Record", x: 552, icon: state.recording ? "stop" : "record"},
+    {label: "More", x: 670, icon: "more"}
+  ];
+
+  controlItems.forEach(function(item) {
+    const selected = item.label.indexOf("Participants") === 0 ? state.participantsOpen : (item.label === "Chat" ? state.chatOpen : false);
+    if (selected) {
+      ctx.fillStyle = "rgba(255,255,255,.07)";
+      roundedRectPath(ctx, item.x - 18, cy + 8, 64, 48, 9);
+      ctx.fill();
+    }
+    if (item.label === "Stop Recording") {
+      ctx.fillStyle = "rgba(223,62,72,.12)";
+      roundedRectPath(ctx, item.x - 18, cy + 8, 90, 48, 9);
+      ctx.fill();
+    }
+    ctx.fillStyle = item.label === "Stop Video" || item.label === "Unmute" ? "#dce3eb" : "#dce3eb";
+    ctx.font = "800 8px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(item.label, item.x + 14, cy + 44);
+  });
+
+  // End call.
+  ctx.fillStyle = "#df3e48";
+  roundedRectPath(ctx, width - 78, cy + 17, 62, 38, 8);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "800 9px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("End", width - 47, cy + 37);
 
   recordingState.animationFrame = requestAnimationFrame(drawRecordingFrame);
 }
