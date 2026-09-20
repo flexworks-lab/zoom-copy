@@ -55,6 +55,368 @@ const state = {
 
 const recordingAvatarImages = new Map();
 
+const MEETING_DB_NAME = "zoom-copy-meeting-storage";
+const MEETING_DB_VERSION = 1;
+const MEETING_RECORD_ID = "active";
+let meetingDbPromise = null;
+let meetingSaveTimer = 0;
+let meetingSaveInProgress = false;
+let meetingSaveQueued = false;
+let restoringMeeting = false;
+const meetingAssetBlobCache = new Map();
+
+function openMeetingDb() {
+  if (meetingDbPromise) return meetingDbPromise;
+
+  if (!window.indexedDB) {
+    return Promise.reject(new Error("IndexedDB is not available in this browser."));
+  }
+
+  meetingDbPromise = new Promise(function(resolve, reject) {
+    const request = window.indexedDB.open(MEETING_DB_NAME, MEETING_DB_VERSION);
+
+    request.onupgradeneeded = function() {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("meetings")) {
+        db.createObjectStore("meetings", { keyPath: "id" });
+      }
+    };
+
+    request.onsuccess = function() {
+      const db = request.result;
+      db.onversionchange = function() {
+        db.close();
+      };
+      resolve(db);
+    };
+
+    request.onerror = function() {
+      reject(request.error || new Error("Could not open meeting storage."));
+    };
+  });
+
+  return meetingDbPromise;
+}
+
+function cloneValue(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function capturePersistentPlaybackState() {
+  const playback = {};
+  document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
+    const personId = video.dataset.personId;
+    playback[personId] = {
+      currentTime: Number.isFinite(video.currentTime) ? video.currentTime : 0,
+      wasPaused: video.paused
+    };
+  });
+  return playback;
+}
+
+async function getMeetingAssetBlob(url) {
+  if (!url || !String(url).startsWith("blob:")) return null;
+  if (meetingAssetBlobCache.has(url)) return meetingAssetBlobCache.get(url);
+
+  const promise = fetch(url).then(function(response) {
+    if (!response.ok) throw new Error("Could not read local meeting media.");
+    return response.blob();
+  });
+
+  meetingAssetBlobCache.set(url, promise);
+  try {
+    return await promise;
+  } catch (error) {
+    meetingAssetBlobCache.delete(url);
+    throw error;
+  }
+}
+
+async function persistVideoList(videos, ownerId, assets) {
+  const list = Array.isArray(videos) ? videos : [];
+
+  return Promise.all(list.map(async function(item, index) {
+    const source = item || {};
+    const saved = {
+      name: source.name || ("Video " + (index + 1))
+    };
+
+    if (source.url && String(source.url).startsWith("blob:")) {
+      const assetId = ownerId + ":video:" + index;
+      const blob = await getMeetingAssetBlob(source.url);
+      assets.set(assetId, blob);
+      saved.assetId = assetId;
+      saved.type = blob.type || "";
+    } else if (source.url) {
+      saved.url = source.url;
+    }
+
+    return saved;
+  }));
+}
+
+async function buildSavedMeetingState() {
+  const assets = new Map();
+
+  const saved = {
+    version: 1,
+    meetingId: state.meetingId,
+    micOn: state.micOn,
+    cameraOn: state.cameraOn,
+    shareOn: state.shareOn,
+    participantsOpen: state.participantsOpen,
+    chatOpen: state.chatOpen,
+    displayName: state.displayName,
+    hostId: state.hostId,
+    myVideoIndex: state.myVideoIndex,
+    myAutoPlayNext: state.myAutoPlayNext,
+    myAutoCameraOff: state.myAutoCameraOff,
+    cameraHidden: cloneValue(state.cameraHidden) || {},
+    keybinds: cloneValue(state.keybinds) || {},
+    nextKeybinds: cloneValue(state.nextKeybinds) || {},
+    audioKeybinds: cloneValue(state.audioKeybinds) || {},
+    leaveKeybinds: cloneValue(state.leaveKeybinds) || {},
+    myAudioOn: state.myAudioOn,
+    audioEnabled: state.audioEnabled,
+    recordingNumber: state.recordingNumber,
+    myParticipantHidden: state.myParticipantHidden,
+    participantSearch: state.participantSearch || "",
+    playback: capturePersistentPlaybackState(),
+    fakePeople: [],
+    myVideos: []
+  };
+
+  saved.myVideos = await persistVideoList(state.myVideos || [], "me", assets);
+
+  if (state.myAvatarUrl && String(state.myAvatarUrl).startsWith("blob:")) {
+    const avatarBlob = await getMeetingAssetBlob(state.myAvatarUrl);
+    assets.set("me:avatar", avatarBlob);
+    saved.myAvatarAssetId = "me:avatar";
+  }
+
+  for (const person of state.fakePeople) {
+    const copy = Object.assign({}, cloneValue(person));
+    copy.videos = await persistVideoList(person.videos || [], person.id, assets);
+
+    if (person.avatarUrl && String(person.avatarUrl).startsWith("blob:")) {
+      const avatarBlob = await getMeetingAssetBlob(person.avatarUrl);
+      const avatarAssetId = person.id + ":avatar";
+      assets.set(avatarAssetId, avatarBlob);
+      copy.avatarAssetId = avatarAssetId;
+      copy.avatarUrl = null;
+    }
+
+    saved.fakePeople.push(copy);
+  }
+
+  return {
+    record: {
+      id: MEETING_RECORD_ID,
+      version: 1,
+      savedAt: Date.now(),
+      state: saved,
+      assets: Array.from(assets.entries()).map(function(entry) {
+        return {
+          id: entry[0],
+          blob: entry[1],
+          type: entry[1] && entry[1].type || ""
+        };
+      })
+    }
+  };
+}
+
+function putMeetingRecord(record) {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("meetings", "readwrite");
+      tx.objectStore("meetings").put(record);
+      tx.oncomplete = function() { resolve(); };
+      tx.onerror = function() { reject(tx.error || new Error("Could not save the meeting.")); };
+      tx.onabort = function() { reject(tx.error || new Error("Meeting save was aborted.")); };
+    });
+  });
+}
+
+async function saveMeetingState() {
+  if (restoringMeeting) return;
+  if (meetingSaveInProgress) {
+    meetingSaveQueued = true;
+    return;
+  }
+
+  meetingSaveInProgress = true;
+  try {
+    const built = await buildSavedMeetingState();
+    await putMeetingRecord(built.record);
+
+    if (navigator.storage && navigator.storage.persist) {
+      try { await navigator.storage.persist(); } catch (error) {}
+    }
+  } catch (error) {
+    console.warn("Could not save the meeting locally.", error);
+  } finally {
+    meetingSaveInProgress = false;
+    if (meetingSaveQueued) {
+      meetingSaveQueued = false;
+      queueMeetingSave(250);
+    }
+  }
+}
+
+function queueMeetingSave(delay) {
+  if (restoringMeeting) return;
+  if (meetingSaveTimer) clearTimeout(meetingSaveTimer);
+
+  meetingSaveTimer = setTimeout(function() {
+    meetingSaveTimer = 0;
+    saveMeetingState();
+  }, delay == null ? 350 : Math.max(0, delay));
+}
+
+function getMeetingRecord() {
+  return openMeetingDb().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      const tx = db.transaction("meetings", "readonly");
+      const request = tx.objectStore("meetings").get(MEETING_RECORD_ID);
+      request.onsuccess = function() { resolve(request.result || null); };
+      request.onerror = function() { reject(request.error || new Error("Could not load the saved meeting.")); };
+    });
+  });
+}
+
+function loadAssetUrls(record) {
+  const urls = {};
+  (record.assets || []).forEach(function(asset) {
+    if (!asset || !asset.id || !asset.blob) return;
+    try {
+      urls[asset.id] = URL.createObjectURL(asset.blob);
+    } catch (error) {
+      console.warn("Could not restore meeting media.", error);
+    }
+  });
+  return urls;
+}
+
+function restoreVideoAssets(videos, assetUrls) {
+  return (Array.isArray(videos) ? videos : []).map(function(item) {
+    const copy = Object.assign({}, item);
+    if (copy.assetId) {
+      copy.url = assetUrls[copy.assetId] || null;
+      delete copy.assetId;
+      delete copy.type;
+    }
+    return copy;
+  }).filter(function(item) {
+    return Boolean(item.url);
+  });
+}
+
+function restoreMeetingRecord(record) {
+  if (!record || !record.state) return false;
+
+  const saved = record.state;
+  const assetUrls = loadAssetUrls(record);
+
+  state.meetingId = saved.meetingId || state.meetingId;
+  state.micOn = saved.micOn !== false;
+  state.cameraOn = saved.cameraOn !== false;
+  state.shareOn = saved.shareOn === true;
+  state.participantsOpen = saved.participantsOpen !== false;
+  state.chatOpen = saved.chatOpen === true;
+  state.displayName = saved.displayName || "Me";
+  state.hostId = saved.hostId || null;
+  state.myVideoIndex = Number(saved.myVideoIndex) || 0;
+  state.myAutoPlayNext = saved.myAutoPlayNext === true;
+  state.myAutoCameraOff = saved.myAutoCameraOff !== false;
+  state.cameraHidden = saved.cameraHidden || {};
+  state.keybinds = saved.keybinds || {};
+  state.nextKeybinds = saved.nextKeybinds || {};
+  state.audioKeybinds = saved.audioKeybinds || {};
+  state.leaveKeybinds = saved.leaveKeybinds || {};
+  state.myAudioOn = saved.myAudioOn !== false;
+  state.audioEnabled = saved.audioEnabled !== false;
+  state.recordingNumber = Number(saved.recordingNumber) || 0;
+  state.myParticipantHidden = saved.myParticipantHidden === true;
+  state.participantSearch = saved.participantSearch || "";
+
+  state.myVideos = restoreVideoAssets(saved.myVideos, assetUrls);
+
+  if (saved.myAvatarAssetId) {
+    state.myAvatarUrl = assetUrls[saved.myAvatarAssetId] || null;
+  } else {
+    state.myAvatarUrl = saved.myAvatarUrl || null;
+  }
+
+  state.fakePeople = (Array.isArray(saved.fakePeople) ? saved.fakePeople : []).map(function(person) {
+    const copy = Object.assign({}, person);
+    copy.videos = restoreVideoAssets(person.videos, assetUrls);
+    if (person.avatarAssetId) {
+      copy.avatarUrl = assetUrls[person.avatarAssetId] || null;
+    } else if (!copy.avatarUrl) {
+      copy.avatarUrl = null;
+    }
+    delete copy.avatarAssetId;
+    return copy;
+  });
+
+  state.leaveHistory = [];
+  state.recording = false;
+  state.recordingBusy = false;
+  state.recordingProgress = 0;
+  state.recordingElapsedMs = 0;
+
+  normalizeHosts();
+
+  state.page = "meeting";
+  state._savedPlayback = saved.playback || {};
+  return true;
+}
+
+async function restoreSavedMeeting() {
+  restoringMeeting = true;
+  try {
+    const record = await getMeetingRecord();
+    return restoreMeetingRecord(record);
+  } catch (error) {
+    console.warn("Saved meeting could not be restored.", error);
+    return false;
+  } finally {
+    restoringMeeting = false;
+  }
+}
+
+function restorePersistedPlayback() {
+  const snapshot = state._savedPlayback || {};
+  delete state._savedPlayback;
+
+  Object.keys(snapshot).forEach(function(personId) {
+    const saved = snapshot[personId];
+    const video = document.querySelector('video.participant-video[data-person-id="' + personId + '"]');
+    if (!video || !saved) return;
+
+    const restore = function() {
+      try {
+        if (Number.isFinite(saved.currentTime) && saved.currentTime > 0) {
+          video.currentTime = Math.min(saved.currentTime, Math.max(0, (video.duration || saved.currentTime) - 0.05));
+        }
+      } catch (error) {}
+
+      if (!saved.wasPaused) {
+        video.play().catch(function(){});
+      } else {
+        video.pause();
+      }
+      updateClipControlLabels(personId);
+    };
+
+    if (video.readyState >= 1) restore();
+    else video.addEventListener("loadedmetadata", restore, { once: true });
+  });
+}
+
+
+
 const recordingState = {
   recorder: null,
   chunks: [],
@@ -333,6 +695,7 @@ function togglePersonCamera(personId) {
   updateParticipantTile(personId);
   updateParticipantsListOnly();
   if (state.recording) syncRecordingAudio();
+  queueMeetingSave();
 }
 
 function handleVideoEnded(personId) {
@@ -372,6 +735,7 @@ function handleVideoEnded(personId) {
 
   updateParticipantTile(personId);
   updateParticipantsListOnly();
+  queueMeetingSave();
 }
 
 function setPersonKeybind(personId, key) {
@@ -476,6 +840,7 @@ function leaveMeetingAsMe() {
   updateParticipantsListOnly();
   syncAudioIndicator();
   if (state.recording) syncRecordingAudio();
+  queueMeetingSave();
   return true;
 }
 
@@ -516,6 +881,7 @@ function leavePerson(personId) {
   updateParticipantsListOnly();
   syncAudioIndicator();
   if (state.recording) syncRecordingAudio();
+  queueMeetingSave();
   return true;
 }
 
@@ -591,6 +957,7 @@ function setAudioForPerson(personId, enabled) {
   updateParticipantTile(personId);
   updateParticipantsListOnly();
   if (state.recording) syncRecordingAudio();
+  queueMeetingSave();
 }
 
 function revokeVideos(videos) {
@@ -612,6 +979,7 @@ function addVideoFiles(target, files) {
     target.videos = (Array.isArray(target.videos) ? target.videos : []).concat(additions);
   }
 }
+  queueMeetingSave();
 
 function captureVideoState() {
   const snapshot = {};
@@ -656,6 +1024,7 @@ function render() {
   else app.innerHTML = renderHome();
   bind();
   if (state.page === "meeting") restoreVideoState(videoState);
+  queueMeetingSave();
 }
 
 function shell(content, active) {
@@ -724,6 +1093,7 @@ function restartPersonClip(personId) {
     video.play().catch(function() {});
     updateClipControlLabels(personId);
     syncAudioIndicator();
+    queueMeetingSave();
   };
 
   if (video.readyState >= 1) start();
@@ -746,6 +1116,7 @@ function togglePersonClip(personId) {
   }
   updateClipControlLabels(personId);
   syncAudioIndicator();
+  queueMeetingSave();
   return true;
 }
 
@@ -2271,6 +2642,7 @@ function bind() {
         updateParticipantTile("me");
         updateParticipantsListOnly();
         if (state.recording) syncRecordingAudio();
+        queueMeetingSave();
         return;
       }
       if (a === "toggle-participants") state.participantsOpen = !state.participantsOpen;
@@ -2389,5 +2761,23 @@ window.addEventListener("keydown", function(e) {
   }
 });
 
-normalizeHosts();
-render();
+async function bootMeetingApp() {
+  const restored = await restoreSavedMeeting();
+  normalizeHosts();
+  render();
+  if (restored) restorePersistedPlayback();
+}
+
+window.addEventListener("visibilitychange", function() {
+  if (document.visibilityState === "hidden") queueMeetingSave(0);
+});
+
+window.addEventListener("pagehide", function() {
+  queueMeetingSave(0);
+});
+
+setInterval(function() {
+  queueMeetingSave();
+}, 5000);
+
+bootMeetingApp();
