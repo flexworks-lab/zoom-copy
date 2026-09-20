@@ -384,7 +384,22 @@ function playLeaveSound() {
   leaveSound.play().catch(function() {});
 }
 
+function leaveMeetingAsMe() {
+  playLeaveSound();
+
+  if (state.recording) {
+    stopRecording();
+  }
+
+  render();
+  state.page = "home";
+  render();
+  return true;
+}
+
 function leavePerson(personId) {
+  if (personId === "me") return leaveMeetingAsMe();
+
   const index = state.fakePeople.findIndex(function(p) { return p.id === personId; });
   if (index < 0) return false;
 
@@ -676,7 +691,7 @@ function renderParticipants() {
   const myVideos = state.myVideos || [];
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
-    '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button></div>' +
+    '<div class="my-participant-card"><div class="avatar">MC</div><div><strong>' + safeDisplayName + '</strong><span>You · ' + myVideos.length + ' video' + (myVideos.length === 1 ? "" : "s") + ' · ' + myAudioText + '</span></div><div class="participant-row-actions"><button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button><button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button></div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button><div class="participant-list">' +
     state.fakePeople.map(function(p){
       const videos = getVideos(p);
@@ -709,7 +724,7 @@ function openParticipantEditor(personId) {
   const currentKey = isNew ? "" : (state.keybinds[personId] || "");
   const currentNextKey = isNew ? "" : (state.nextKeybinds[personId] || "");
   const currentAudioKey = isNew ? "" : (state.audioKeybinds[personId] || "");
-  const currentLeaveKey = isNew || isMe ? "" : (state.leaveKeybinds[personId] || "");
+  const currentLeaveKey = isNew ? "" : (state.leaveKeybinds[personId] || "");
   const autoPlayNext = isNew ? false : (isMe ? state.myAutoPlayNext : person.autoPlayNext === true);
   const autoCameraOff = isNew ? true : (isMe ? state.myAutoCameraOff !== false : person.autoCameraOff !== false);
   const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
@@ -736,7 +751,7 @@ function openParticipantEditor(personId) {
       '<div class="file-help">Off: the camera stays on the last video frame. On: the camera turns off when the video ends.</div>' +
       '<label class="check-row autoplay-row"><input name="autoCameraOff" type="checkbox" ' + (autoCameraOff ? "checked" : "") + '><span>Turn camera off when video ends</span></label>' +
       '<div class="file-help">Disable this to keep the camera tile visible after a video finishes.</div>' +
-      (!isMe ? '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label><div class="file-help">This person leaves the meeting when the key is pressed.</div>' : '') +
+      (!isNew ? '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label><div class="file-help">This person leaves the meeting when the key is pressed.</div>' : '') +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
       (!isNew && videos.length > 1 ? '<button type="button" class="secondary" data-next-video>Play next now</button>' : '') +
       '</div>' +
@@ -869,6 +884,7 @@ function openParticipantEditor(personId) {
       setPersonKeybind("me", key);
       setNextKeybind("me", nextKey);
       setAudioKeybind("me", audioKey);
+      setLeaveKeybind("me", leaveKey);
     } else {
       const target = state.fakePeople.find(function(p) { return p.id === personId; });
       if (!target) return;
@@ -1576,6 +1592,7 @@ function bind() {
       }
       if (a === "add-person") { openAddPerson(); return; }
       if (a === "edit-person") { openParticipantEditor(el.dataset.personId); return; }
+      if (a === "leave-person") { leavePerson(el.dataset.personId); return; }
       if (a === "add-video") { openFakeCameraPicker(); return; }
       if (a === "toggle-person-audio") {
         const personId = el.dataset.personId;
