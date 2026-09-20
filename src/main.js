@@ -724,7 +724,7 @@ function openParticipantEditor(personId) {
       '<div class="file-help">Off: the camera stays on the last video frame. On: the camera turns off when the video ends.</div>' +
       '<label class="check-row autoplay-row"><input name="autoCameraOff" type="checkbox" ' + (autoCameraOff ? "checked" : "") + '><span>Turn camera off when video ends</span></label>' +
       '<div class="file-help">Disable this to keep the camera tile visible after a video finishes.</div>' +
-      (!isNew && !isMe ? '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label><div class="file-help">This person leaves the meeting when the key is pressed.</div>' : '') +
+      (!isMe ? '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label><div class="file-help">This person leaves the meeting when the key is pressed.</div>' : '') +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
       (!isNew && videos.length > 1 ? '<button type="button" class="secondary" data-next-video>Play next now</button>' : '') +
       '</div>' +
@@ -834,6 +834,7 @@ function openParticipantEditor(personId) {
       setPersonKeybind(newPerson.id, key);
       setNextKeybind(newPerson.id, nextKey);
       setAudioKeybind(newPerson.id, audioKey);
+      setLeaveKeybind(newPerson.id, leaveKey);
     } else if (isMe) {
       state.displayName = name;
       state.myAutoPlayNext = autoPlay;
