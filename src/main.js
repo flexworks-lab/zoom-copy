@@ -1285,16 +1285,35 @@ function togglePersonClip(personId) {
   return true;
 }
 
-function pauseAllVideos() {
-  getRecordingPeople().forEach(function(person) {
-    if (getVideos(person).length) state.clipPaused[person.id] = true;
+function togglePauseAllVideos() {
+  const videos = Array.from(document.querySelectorAll("video.participant-video[data-person-id]"));
+  if (!videos.length) return false;
+
+  const hasPlayingVideo = videos.some(function(video) {
+    return !video.paused && !video.ended;
   });
 
-  document.querySelectorAll("video.participant-video[data-person-id]").forEach(function(video) {
-    state.clipPaused[video.dataset.personId] = true;
-    try { video.pause(); } catch (error) {}
-    updateClipControlLabels(video.dataset.personId);
-  });
+  if (hasPlayingVideo) {
+    getRecordingPeople().forEach(function(person) {
+      if (getVideos(person).length) state.clipPaused[person.id] = true;
+    });
+
+    videos.forEach(function(video) {
+      state.clipPaused[video.dataset.personId] = true;
+      try { video.pause(); } catch (error) {}
+      updateClipControlLabels(video.dataset.personId);
+    });
+  } else {
+    videos.forEach(function(video) {
+      const personId = video.dataset.personId;
+      state.clipPaused[personId] = false;
+      if (video.ended) {
+        try { video.currentTime = 0; } catch (error) {}
+      }
+      video.play().catch(function() {});
+      updateClipControlLabels(personId);
+    });
+  }
 
   syncAudioIndicator();
   queueMeetingSave();
@@ -1458,7 +1477,7 @@ function renderParticipants() {
     '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back" data-person-id="me">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
     (state.participantOptionsOpen ? '<div class="participant-options"><div class="participant-options-title"><strong>Participant options</strong><button class="options-close" data-action="toggle-participant-options">Done</button></div>' +
-      '<div class="global-video-shortcut"><div><strong>Pause all videos</strong><small>Keybind for every active clip.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
+      '<div class="global-video-shortcut"><div><strong>Pause / resume all videos</strong><small>Toggle every active clip with one key.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
       (state.leaveHistory.length ? '<button class="join-back-button" data-action="join-back"><span>↩</span><strong>Join Back</strong><small>Restore the last person who left with the same setup</small></button>' : '') +
       '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div></div>' : '') +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
@@ -2992,7 +3011,7 @@ window.addEventListener("keydown", function(e) {
 
   if (state.pauseAllKeybind && state.pauseAllKeybind === key) {
     e.preventDefault();
-    pauseAllVideos();
+    togglePauseAllVideos();
     return;
   }
 
