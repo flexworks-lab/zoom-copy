@@ -1481,7 +1481,10 @@ async function startRecording() {
   recordingState.recorder.onstop = async function() {
     const chunks = recordingState.chunks.slice();
     const sourceType = recordingState.recorder && recordingState.recorder.mimeType || mimeType || "video/webm";
-    await finishRecording(chunks, sourceTasync function finishRecording(chunks, sourceType) {
+    await finishRecording(chunks, sourceType);
+  };
+
+async function finishRecording(chunks, sourceType) {
   const normalizedType = String(sourceType || "video/webm").toLowerCase();
   const isDirectMp4 = normalizedType.indexOf("video/mp4") === 0;
   const sourceBlob = new Blob(chunks, { type: normalizedType });
