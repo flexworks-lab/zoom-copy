@@ -401,6 +401,7 @@ function restorePersistedPlayback() {
     if (!video || !saved) return;
 
     const restore = function() {
+      state.clipPaused[personId] = saved.wasPaused === true;
       try {
         if (Number.isFinite(saved.currentTime) && saved.currentTime > 0) {
           video.currentTime = Math.min(saved.currentTime, Math.max(0, (video.duration || saved.currentTime) - 0.05));
@@ -670,6 +671,7 @@ function advancePersonVideo(personId) {
 
   if (personId === "me") {
     state.myVideoIndex = (state.myVideoIndex + 1) % videos.length;
+    state.clipPaused[personId] = false;
     if (wasVisible) {
       state.cameraHidden.me = false;
       state.cameraOn = true;
@@ -679,6 +681,7 @@ function advancePersonVideo(personId) {
     const target = state.fakePeople.find(function(p) { return p.id === personId; });
     if (!target) return false;
     target.currentVideoIndex = ((target.currentVideoIndex || 0) + 1) % target.videos.length;
+    state.clipPaused[personId] = false;
     if (wasVisible) target.cameraVisible = true;
     target.needsNextOnCamera = false;
   }
@@ -733,6 +736,7 @@ function handleVideoEnded(personId) {
     return;
   }
 
+  state.clipPaused[personId] = true;
   const autoCameraOff = person.id === "me" ? state.myAutoCameraOff !== false : person.autoCameraOff !== false;
   if (!autoCameraOff) {
     if (personId === "me") state.needsNextOnCamera = false;
@@ -907,6 +911,9 @@ function leavePerson(personId) {
   delete state.nextKeybinds[personId];
   delete state.audioKeybinds[personId];
   delete state.leaveKeybinds[personId];
+  delete state.pauseKeybinds[personId];
+  delete state.restartKeybinds[personId];
+  delete state.clipPaused[personId];
   normalizeHosts();
 
   const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
@@ -1214,7 +1221,7 @@ function participantTile(person) {
   const videoCount = getVideos(person).length;
   const showVideo = Boolean(videoUrl && isCameraVisible(person));
   const media = showVideo
-    ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '" autoplay playsinline' +
+    ? '<video class="participant-video" data-person-id="' + person.id + '" data-video-url="' + escapeHtml(videoUrl) + '" src="' + videoUrl + '"' + (state.clipPaused[person.id] ? '' : ' autoplay') + ' playsinline' +
       (state.audioEnabled && isPersonAudioOn(person) ? "" : " muted") + '></video>'
     : '<div class="participant-avatar" style="--hue:' + person.hue + '">' + avatarMarkup(person, "participant-avatar-image") + '<span' + (getAvatarUrl(person) ? ' class="participant-avatar-initials"' : '') + '>' + escapeHtml(person.initials) + '</span></div>';
 
@@ -1362,6 +1369,7 @@ function renderParticipants() {
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><button class="panel-close" data-action="toggle-participants">×</button></div>' +
     '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back" data-person-id="me">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
+    '<div class="global-video-shortcut"><div><strong>Pause all videos</strong><small>Keybind for every active clip.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
     (state.leaveHistory.length ? '<button class="join-back-button" data-action="join-back"><span>↩</span><strong>Join Back</strong><small>Restore the last person who left with the same setup</small></button>' : '') +
     '<div class="file-help leave-undo-help">Press <strong>0</strong> to bring back the last person who left with the same videos, profile picture, settings, and keybinds.</div>' +
     '<label class="participant-search"><span class="participant-search-icon">⌕</span><input type="search" data-participant-search placeholder="Search participants" value="' + escapeHtml(state.participantSearch || "") + '" autocomplete="off"></label>' +
@@ -1399,6 +1407,7 @@ function openParticipantEditor(personId) {
   const currentAudioKey = isNew ? "" : (state.audioKeybinds[personId] || "");
   const currentLeaveKey = isNew ? "" : (state.leaveKeybinds[personId] || "");
   const currentPauseKey = isNew ? "" : (state.pauseKeybinds[personId] || "");
+  const currentRestartKey = isNew ? "" : (state.restartKeybinds[personId] || "");
   const autoPlayNext = isNew ? false : (isMe ? state.myAutoPlayNext : person.autoPlayNext === true);
   const autoCameraOff = isNew ? true : (isMe ? state.myAutoCameraOff !== false : person.autoCameraOff !== false);
   const currentIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
@@ -1430,6 +1439,8 @@ function openParticipantEditor(personId) {
       '<div class="file-help">Disable this to keep the camera tile visible after a video finishes.</div>' +
       '<label class="field-label">Pause / Play clip keybind<input name="pauseKeybind" class="keybind-input" value="' + escapeHtml(currentPauseKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
       '<div class="file-help">Toggle this person’s clip between Pause and Play with one key.</div>' +
+      '<label class="field-label">Restart clip keybind<input name="restartKeybind" class="keybind-input" value="' + escapeHtml(currentRestartKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
+      '<div class="file-help">Restart this person’s current clip from the beginning.</div>' +
       '<label class="field-label">Leave keybind<input name="leaveKeybind" class="keybind-input" value="' + escapeHtml(currentLeaveKey.toUpperCase()) + '" placeholder="Press a key" maxlength="1" autocomplete="off"></label>' +
       '<div class="file-help">This person leaves the meeting when the key is pressed. Press 0 to undo the last leave.</div>' +
       '<div class="editor-actions-row"><label class="check-row"><input name="clearVideos" type="checkbox"><span>Remove all videos</span></label>' +
@@ -1513,7 +1524,7 @@ function openParticipantEditor(personId) {
     });
   }
 
-  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"], [name="pauseKeybind"], [name="leaveKeybind"]').forEach(function(input) {
+  modal.querySelectorAll('[name="keybind"], [name="nextKeybind"], [name="audioKeybind"], [name="pauseKeybind"], [name="restartKeybind"], [name="leaveKeybind"]').forEach(function(input) {
     input.addEventListener("keydown", function(e) {
       if (["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
       e.preventDefault();
@@ -1552,6 +1563,7 @@ function openParticipantEditor(personId) {
       const audioKey = String(fd.get("audioKeybind") || "").trim();
       const leaveKey = String(fd.get("leaveKeybind") || "").trim();
       const pauseKey = String(fd.get("pauseKeybind") || "").trim();
+      const restartKey = String(fd.get("restartKeybind") || "").trim();
       const autoCameraOff = form.querySelector('[name="autoCameraOff"]').checked;
 
       if (isNew) {
@@ -1578,6 +1590,7 @@ function openParticipantEditor(personId) {
         setAudioKeybind(newPerson.id, audioKey);
         setLeaveKeybind(newPerson.id, leaveKey);
         setPauseKeybind(newPerson.id, pauseKey);
+        setRestartKeybind(newPerson.id, restartKey);
       } else if (isMe) {
         state.displayName = name;
         if (clearAvatar) {
@@ -1609,6 +1622,7 @@ function openParticipantEditor(personId) {
         setAudioKeybind("me", audioKey);
         setLeaveKeybind("me", leaveKey);
         setPauseKeybind("me", pauseKey);
+        setRestartKeybind("me", restartKey);
       } else {
         const target = state.fakePeople.find(function(p) { return p.id === personId; });
         if (!target) throw new Error("This participant no longer exists.");
@@ -1638,6 +1652,7 @@ function openParticipantEditor(personId) {
         setAudioKeybind(personId, audioKey);
         setLeaveKeybind(personId, leaveKey);
         setPauseKeybind(personId, pauseKey);
+        setRestartKeybind(personId, restartKey);
         normalizeHosts();
       }
 
@@ -1698,7 +1713,13 @@ function wireParticipantVideo(video) {
     updateClipControlLabels(video.dataset.personId);
   });
   video.addEventListener("volumechange", syncAudioIndicator);
-  video.play().then(syncAudioIndicator).catch(syncAudioIndicator);
+  if (state.clipPaused[video.dataset.personId]) {
+    video.pause();
+    updateClipControlLabels(video.dataset.personId);
+    syncAudioIndicator();
+  } else {
+    video.play().then(syncAudioIndicator).catch(syncAudioIndicator);
+  }
 }
 
 function getRecordingPeople() {
@@ -2794,6 +2815,26 @@ function bind() {
     wireParticipantVideo(v);
   });
 
+  const pauseAllInput = document.querySelector("[data-pause-all-keybind]");
+  if (pauseAllInput) {
+    pauseAllInput.addEventListener("keydown", function(e) {
+      if (["Tab", "Shift", "Control", "Alt", "Meta"].includes(e.key)) return;
+      e.preventDefault();
+      if (e.key === "Backspace" || e.key === "Delete" || e.key === "Escape") {
+        setPauseAllKeybind("");
+        pauseAllInput.value = "";
+        queueMeetingSave();
+        return;
+      }
+      if (/^[a-z0-9]$/i.test(e.key) && e.key !== "0") {
+        setPauseAllKeybind(e.key);
+        pauseAllInput.value = e.key.toUpperCase();
+        queueMeetingSave();
+      }
+    });
+    pauseAllInput.addEventListener("focus", function() { pauseAllInput.select(); });
+  }
+
   const participantSearch = document.querySelector("[data-participant-search]");
   if (participantSearch) {
     participantSearch.addEventListener("input", function() {
@@ -2856,6 +2897,21 @@ window.addEventListener("keydown", function(e) {
   if (leavePersonId) {
     e.preventDefault();
     leavePerson(leavePersonId);
+    return;
+  }
+
+  if (state.pauseAllKeybind && state.pauseAllKeybind === key) {
+    e.preventDefault();
+    pauseAllVideos();
+    return;
+  }
+
+  const restartPersonId = Object.keys(state.restartKeybinds).find(function(id) {
+    return state.restartKeybinds[id] === key;
+  });
+  if (restartPersonId) {
+    e.preventDefault();
+    restartPersonClip(restartPersonId);
     return;
   }
 
