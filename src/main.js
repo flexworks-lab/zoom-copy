@@ -341,14 +341,14 @@ function restoreMeetingRecord(record) {
   state.myAutoPlayNext = saved.myAutoPlayNext === true;
   state.myAutoCameraOff = saved.myAutoCameraOff !== false;
   state.cameraHidden = saved.cameraHidden || {};
-  state.keybinds = saved.keybinds || {};
-  state.nextKeybinds = saved.nextKeybinds || {};
-  state.audioKeybinds = saved.audioKeybinds || {};
-  state.leaveKeybinds = saved.leaveKeybinds || {};
-  state.pauseKeybinds = saved.pauseKeybinds || {};
-  state.restartKeybinds = saved.restartKeybinds || {};
-  state.pauseAllKeybind = saved.pauseAllKeybind || "p";
-  state.clipPaused = saved.clipPaused || {};
+  state.keybinds = saved.keybinds && typeof saved.keybinds === "object" ? saved.keybinds : {};
+  state.nextKeybinds = saved.nextKeybinds && typeof saved.nextKeybinds === "object" ? saved.nextKeybinds : {};
+  state.audioKeybinds = saved.audioKeybinds && typeof saved.audioKeybinds === "object" ? saved.audioKeybinds : {};
+  state.leaveKeybinds = saved.leaveKeybinds && typeof saved.leaveKeybinds === "object" ? saved.leaveKeybinds : {};
+  state.pauseKeybinds = saved.pauseKeybinds && typeof saved.pauseKeybinds === "object" ? saved.pauseKeybinds : {};
+  state.restartKeybinds = saved.restartKeybinds && typeof saved.restartKeybinds === "object" ? saved.restartKeybinds : {};
+  state.pauseAllKeybind = typeof saved.pauseAllKeybind === "string" ? saved.pauseAllKeybind : "p";
+  state.clipPaused = saved.clipPaused && typeof saved.clipPaused === "object" ? saved.clipPaused : {};
   state.myAudioOn = saved.myAudioOn !== false;
   state.audioEnabled = saved.audioEnabled !== false;
   state.recordingNumber = Number(saved.recordingNumber) || 0;
@@ -406,7 +406,7 @@ function restorePersistedPlayback() {
   const snapshot = state._savedPlayback || {};
   delete state._savedPlayback;
 
-  Object.keys(snapshot).forEach(function(personId) {
+  Object.keys(snapshot || {}).forEach(function(personId) {
     const saved = snapshot[personId];
     const video = document.querySelector('video.participant-video[data-person-id="' + personId + '"]');
     if (!video || !saved) return;
@@ -779,7 +779,7 @@ function setPersonKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.keybinds[personId];
   if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
-  Object.keys(state.keybinds).forEach(function(id) {
+  Object.keys(state.keybinds || {}).forEach(function(id) {
     if (id !== personId && state.keybinds[id] === normalized) delete state.keybinds[id];
   });
   state.keybinds[personId] = normalized;
@@ -789,7 +789,7 @@ function setNextKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.nextKeybinds[personId];
   if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
-  Object.keys(state.nextKeybinds).forEach(function(id) {
+  Object.keys(state.nextKeybinds || {}).forEach(function(id) {
     if (id !== personId && state.nextKeybinds[id] === normalized) delete state.nextKeybinds[id];
   });
   state.nextKeybinds[personId] = normalized;
@@ -799,7 +799,7 @@ function setLeaveKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.leaveKeybinds[personId];
   if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
-  Object.keys(state.leaveKeybinds).forEach(function(id) {
+  Object.keys(state.leaveKeybinds || {}).forEach(function(id) {
     if (id !== personId && state.leaveKeybinds[id] === normalized) delete state.leaveKeybinds[id];
   });
   state.leaveKeybinds[personId] = normalized;
@@ -809,7 +809,7 @@ function setPauseKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.pauseKeybinds[personId];
   if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
-  Object.keys(state.pauseKeybinds).forEach(function(id) {
+  Object.keys(state.pauseKeybinds || {}).forEach(function(id) {
     if (id !== personId && state.pauseKeybinds[id] === normalized) delete state.pauseKeybinds[id];
   });
   state.pauseKeybinds[personId] = normalized;
@@ -819,7 +819,7 @@ function setRestartKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.restartKeybinds[personId];
   if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
-  Object.keys(state.restartKeybinds).forEach(function(id) {
+  Object.keys(state.restartKeybinds || {}).forEach(function(id) {
     if (id !== personId && state.restartKeybinds[id] === normalized) delete state.restartKeybinds[id];
   });
   state.restartKeybinds[personId] = normalized;
@@ -1059,7 +1059,7 @@ function setAudioKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
   delete state.audioKeybinds[personId];
   if (!/^[a-z0-9]$/i.test(normalized) || normalized === "0") return;
-  Object.keys(state.audioKeybinds).forEach(function(id) {
+  Object.keys(state.audioKeybinds || {}).forEach(function(id) {
     if (id !== personId && state.audioKeybinds[id] === normalized) delete state.audioKeybinds[id];
   });
   state.audioKeybinds[personId] = normalized;
@@ -2960,7 +2960,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const cameraPersonId = Object.keys(state.keybinds).find(function(id) {
+  const cameraPersonId = Object.keys(state.keybinds || {}).find(function(id) {
     return state.keybinds[id] === key;
   });
   if (cameraPersonId) {
@@ -2969,7 +2969,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const nextPersonId = Object.keys(state.nextKeybinds).find(function(id) {
+  const nextPersonId = Object.keys(state.nextKeybinds || {}).find(function(id) {
     return state.nextKeybinds[id] === key;
   });
   if (nextPersonId) {
@@ -2978,7 +2978,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const leavePersonId = Object.keys(state.leaveKeybinds).find(function(id) {
+  const leavePersonId = Object.keys(state.leaveKeybinds || {}).find(function(id) {
     return state.leaveKeybinds[id] === key;
   });
   if (leavePersonId) {
@@ -2993,7 +2993,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const restartPersonId = Object.keys(state.restartKeybinds).find(function(id) {
+  const restartPersonId = Object.keys(state.restartKeybinds || {}).find(function(id) {
     return state.restartKeybinds[id] === key;
   });
   if (restartPersonId) {
@@ -3008,7 +3008,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const restartPersonId = Object.keys(state.restartKeybinds).find(function(id) {
+  const restartPersonId = Object.keys(state.restartKeybinds || {}).find(function(id) {
     return state.restartKeybinds[id] === key;
   });
   if (restartPersonId) {
@@ -3017,7 +3017,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const pausePersonId = Object.keys(state.pauseKeybinds).find(function(id) {
+  const pausePersonId = Object.keys(state.pauseKeybinds || {}).find(function(id) {
     return state.pauseKeybinds[id] === key;
   });
   if (pausePersonId) {
@@ -3026,7 +3026,7 @@ window.addEventListener("keydown", function(e) {
     return;
   }
 
-  const audioPersonId = Object.keys(state.audioKeybinds).find(function(id) {
+  const audioPersonId = Object.keys(state.audioKeybinds || {}).find(function(id) {
     return state.audioKeybinds[id] === key;
   });
   if (audioPersonId) {
