@@ -1349,21 +1349,42 @@ async function syncRecordingAudio() {
   const currentVideos = Array.from(document.querySelectorAll("video.participant-video[data-person-id]"));
   const currentSet = new Set(currentVideos);
 
-  for (const [video, source] of recordingState.mediaSources.entries()) {
+  for (const [video, entry] of recordingState.mediaSources.entries()) {
     if (!currentSet.has(video)) {
-      try { source.disconnect(); } catch (error) {}
+      try { entry.gain.disconnect(); } catch (error) {}
+      try { entry.source.disconnect(); } catch (error) {}
       recordingState.mediaSources.delete(video);
     }
   }
 
   for (const video of currentVideos) {
-    if (recordingState.mediaSources.has(video)) continue;
-    try {
-      const source = recordingState.audioContext.createMediaElementSource(video);
-      source.connect(recordingState.audioDestination);
-      source.connect(recordingState.audioContext.destination);
-      recordingState.mediaSources.set(video, source);
-    } catch (error) {}
+    let entry = recordingState.mediaSources.get(video);
+
+    if (!entry) {
+      try {
+        if (typeof video.captureStream !== "function" && typeof video.mozCaptureStream !== "function") {
+          continue;
+        }
+
+        const captureStream = (video.captureStream || video.mozCaptureStream).call(video);
+        const audioTracks = captureStream.getAudioTracks();
+        if (!audioTracks.length) continue;
+
+        const stream = new MediaStream(audioTracks);
+        const source = recordingState.audioContext.createMediaStreamSource(stream);
+        const gain = recordingState.audioContext.createGain();
+        source.connect(gain);
+        gain.connect(recordingState.audioDestination);
+
+        entry = { stream: stream, source: source, gain: gain };
+        recordingState.mediaSources.set(video, entry);
+      } catch (error) {
+        console.warn("Could not attach participant audio to recording.", error);
+        continue;
+      }
+    }
+
+    entry.gain.gain.value = state.audioEnabled && isPersonAudioOn(getParticipant(video.dataset.personId)) ? 1 : 0;
   }
 
   if (recordingState.audioContext.state === "suspended") {
@@ -1687,8 +1708,14 @@ function cleanupRecording() {
   if (recordingState.recorder && recordingState.recorder.state !== "inactive") {
     try { recordingState.recorder.stop(); } catch (error) {}
   }
-  recordingState.mediaSources.forEach(function(source) {
-    try { source.disconnect(); } catch (error) {}
+  recordingState.mediaSources.forEach(function(entry) {
+    try { entry.gain.disconnect(); } catch (error) {}
+    try { entry.source.disconnect(); } catch (error) {}
+    if (entry.stream) {
+      entry.stream.getTracks().forEach(function(track) {
+        try { track.stop(); } catch (error) {}
+      });
+    }
   });
   recordingState.mediaSources.clear();
 
