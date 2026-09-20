@@ -296,7 +296,8 @@ async function persistVideoList(videos, ownerId, assets) {
   return Promise.all(list.map(async function(item, index) {
     const source = item || {};
     const saved = {
-      name: source.name || ("Video " + (index + 1))
+      name: source.name || ("Video " + (index + 1)),
+      clipLength: Number.isFinite(Number(source.clipLength)) && Number(source.clipLength) > 0 ? Number(source.clipLength) : null
     };
 
     if (source.url && String(source.url).startsWith("blob:")) {
@@ -695,7 +696,14 @@ function restorePersistedPlayback() {
       state.clipPaused[personId] = saved.wasPaused === true;
       try {
         if (Number.isFinite(saved.currentTime) && saved.currentTime > 0) {
-          video.currentTime = Math.min(saved.currentTime, Math.max(0, (video.duration || saved.currentTime) - 0.05));
+          const person = getParticipant(personId);
+          const index = person ? (person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0)) : 0;
+          const clip = person && getVideos(person)[index];
+          const clipLength = clip && Number(clip.clipLength);
+          const maxTime = Number.isFinite(clipLength) && clipLength > 0
+            ? Math.min(video.duration || clipLength, clipLength)
+            : (video.duration || saved.currentTime);
+          video.currentTime = Math.min(saved.currentTime, Math.max(0, maxTime - 0.05));
         }
       } catch (error) {}
 
@@ -1370,6 +1378,54 @@ function revokeVideos(videos) {
   (videos || []).forEach(function(item) {
     if (item && item.url && item.url.startsWith("blob:")) URL.revokeObjectURL(item.url);
   });
+}
+
+function getVideoClipLength(video) {
+  if (!video) return null;
+  const value = Number(video.clipLength);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function loadVideoDuration(url) {
+  return new Promise(function(resolve, reject) {
+    if (!url) {
+      reject(new Error("Missing video source."));
+      return;
+    }
+
+    const probe = document.createElement("video");
+    let settled = false;
+    const finish = function(error, duration) {
+      if (settled) return;
+      settled = true;
+      probe.removeAttribute("src");
+      probe.load();
+      if (error) reject(error);
+      else resolve(duration);
+    };
+
+    probe.preload = "metadata";
+    probe.addEventListener("loadedmetadata", function() {
+      const duration = Number(probe.duration);
+      if (!Number.isFinite(duration) || duration <= 0) {
+        finish(new Error("Could not read video duration."));
+        return;
+      }
+      finish(null, duration);
+    }, { once: true });
+    probe.addEventListener("error", function() {
+      finish(new Error("Could not read video duration."));
+    }, { once: true });
+    probe.src = url;
+    probe.load();
+  });
+}
+
+function formatClipDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  const minutes = Math.floor(value / 60);
+  const remaining = Math.floor(value % 60);
+  return minutes + ":" + String(remaining).padStart(2, "0");
 }
 
 function addVideoFiles(target, files) {
@@ -2196,6 +2252,7 @@ function renderVideoPlaylist(person) {
       '<div class="video-order-actions">' +
         '<button type="button" class="video-order-button" data-move-video="up" data-video-index="' + i + '"' + (isFirst ? ' disabled' : '') + ' aria-label="Move video up">↑</button>' +
         '<button type="button" class="video-order-button" data-move-video="down" data-video-index="' + i + '"' + (isLast ? ' disabled' : '') + ' aria-label="Move video down">↓</button>' +
+        '<button type="button" class="video-edit-button" data-edit-video="' + i + '" aria-label="Edit video">Edit</button>' +
         '<button type="button" class="video-delete-button" data-delete-video="' + i + '" aria-label="Delete video">Delete</button>' +
       '</div>' +
     '</div>';
@@ -2270,6 +2327,103 @@ function deleteParticipantVideo(personId, videoIndex) {
 
   queueMeetingSave();
   return true;
+}
+
+function openClipEditor(personId, videoIndex) {
+  const person = getParticipant(personId);
+  if (!person) return;
+
+  const videos = person.id === "me" ? state.myVideos : person.videos;
+  if (!Array.isArray(videos) || !videos[videoIndex]) return;
+
+  const clip = videos[videoIndex];
+  const modal = document.createElement("div");
+  modal.className = "modal-backdrop";
+  modal.innerHTML =
+    '<form class="modal clip-editor-modal">' +
+      '<button type="button" class="modal-close" data-close>×</button>' +
+      '<span class="eyebrow">Video ' + (videoIndex + 1) + '</span>' +
+      '<h2>Edit clip</h2>' +
+      '<p class="muted">' + escapeHtml(clip.name || ("Video " + (videoIndex + 1))) + '</p>' +
+      '<div class="clip-editor-loading">Reading the original video length…</div>' +
+      '<div class="clip-editor-fields" hidden>' +
+        '<label class="field-label">Clip length <span class="clip-length-value" data-clip-length-value></span>' +
+          '<input name="clipLength" type="range" min="0.1" step="0.1" value="0.1">' +
+        '</label>' +
+        '<div class="clip-range-meta"><span>0:01</span><span data-original-duration>0:00 max</span></div>' +
+        '<div class="file-help">The maximum is the full length of the original video. Shortening this only changes how the clip plays in the meeting.</div>' +
+      '</div>' +
+      '<div class="modal-actions"><span class="modal-spacer"></span><button type="button" class="secondary" data-close>Cancel</button><button class="primary" type="submit" disabled>Save changes</button></div>' +
+    '</form>';
+
+  document.body.appendChild(modal);
+  const form = modal.querySelector("form");
+  const closeButtons = modal.querySelectorAll("[data-close]");
+  const fields = modal.querySelector(".clip-editor-fields");
+  const loading = modal.querySelector(".clip-editor-loading");
+  const range = modal.querySelector('[name="clipLength"]');
+  const valueLabel = modal.querySelector("[data-clip-length-value]");
+  const originalLabel = modal.querySelector("[data-original-duration]");
+  const submitButton = form.querySelector('[type="submit"]');
+
+  let closed = false;
+  function closeModal() {
+    if (closed) return;
+    closed = true;
+    modal.remove();
+  }
+
+  closeButtons.forEach(function(button) {
+    button.addEventListener("click", function(event) {
+      event.preventDefault();
+      closeModal();
+    });
+  });
+  modal.addEventListener("click", function(event) {
+    if (event.target === modal) closeModal();
+  });
+
+  const setValue = function(seconds) {
+    range.value = String(seconds);
+    valueLabel.textContent = formatClipDuration(seconds);
+  };
+  range.addEventListener("input", function() {
+    setValue(Number(range.value));
+  });
+
+  form.addEventListener("submit", function(event) {
+    event.preventDefault();
+    const maxDuration = Number(range.max);
+    let nextLength = Number(range.value);
+    if (!Number.isFinite(maxDuration) || maxDuration <= 0) return;
+    nextLength = Math.max(0.1, Math.min(maxDuration, nextLength));
+    clip.clipLength = nextLength >= maxDuration - 0.05 ? null : Number(nextLength.toFixed(2));
+    state.clipPaused[personId] = false;
+    closeModal();
+    render();
+    if (state.recording) syncRecordingAudio();
+    queueMeetingSave();
+  });
+
+  loadVideoDuration(clip.url).then(function(duration) {
+    if (closed) return;
+    const currentLength = Number(clip.clipLength);
+    const safeCurrent = Number.isFinite(currentLength) && currentLength > 0
+      ? Math.min(currentLength, duration)
+      : duration;
+
+    range.max = duration.toFixed(1);
+    range.value = safeCurrent.toFixed(1);
+    originalLabel.textContent = formatClipDuration(duration) + " max";
+    setValue(safeCurrent);
+    loading.hidden = true;
+    fields.hidden = false;
+    submitButton.disabled = false;
+  }).catch(function(error) {
+    console.warn("Could not read clip duration.", error);
+    if (closed) return;
+    loading.textContent = "This video’s length could not be read.";
+  });
 }
 
 function openParticipantEditor(personId) {
@@ -2558,6 +2712,14 @@ function openParticipantEditor(personId) {
   }
 
   function wireVideoOrderButtons() {
+    modal.querySelectorAll("[data-edit-video]").forEach(function(button) {
+      button.addEventListener("click", function() {
+        const videoIndex = Number(button.dataset.editVideo);
+        if (!Number.isInteger(videoIndex)) return;
+        openClipEditor(personId, videoIndex);
+      });
+    });
+
     modal.querySelectorAll("[data-move-video]").forEach(function(button) {
       button.addEventListener("click", function handleMoveClick() {
         const fromIndex = Number(button.dataset.videoIndex);
@@ -2610,6 +2772,22 @@ function wireParticipantVideo(video) {
   video.addEventListener("ended", function() {
     handleVideoEnded(video.dataset.personId);
     syncAudioIndicator();
+  });
+  video.addEventListener("timeupdate", function() {
+    const personId = video.dataset.personId;
+    const person = getParticipant(personId);
+    if (!person) return;
+    const index = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
+    const clip = getVideos(person)[index];
+    const clipLength = clip && Number(clip.clipLength);
+    if (!Number.isFinite(clipLength) || clipLength <= 0) return;
+    if (video.currentTime >= clipLength) {
+      try { video.currentTime = clipLength; } catch (error) {}
+      video.pause();
+      state.clipPaused[personId] = true;
+      handleVideoEnded(personId);
+      syncAudioIndicator();
+    }
   });
   video.addEventListener("play", function() {
     syncAudioIndicator();
