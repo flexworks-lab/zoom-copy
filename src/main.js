@@ -42,7 +42,8 @@ const state = {
   myAudioOn: true,
   audioEnabled: true,
   audioPlaying: false,
-  recording: false
+  recording: false,
+  myParticipantHidden: false
 };
 
 const recordingState = {
@@ -385,14 +386,17 @@ function playLeaveSound() {
 }
 
 function leaveMeetingAsMe() {
+  if (state.myParticipantHidden) return false;
+
   playLeaveSound();
+  state.myParticipantHidden = true;
 
-  if (state.recording) {
-    stopRecording();
-  }
+  const tile = document.querySelector('.participant-tile[data-person-id="me"]');
+  if (tile) tile.remove();
 
-  state.page = "home";
-  render();
+  updateParticipantsListOnly();
+  syncAudioIndicator();
+  if (state.recording) syncRecordingAudio();
   return true;
 }
 
@@ -632,18 +636,17 @@ function updateParticipantsListOnly() {
 }
 
 function renderMeeting() {
-  const allPeople = [
-    {
-      id: "me",
-      name: state.displayName,
-      role: "You",
-      initials: initialsFor(state.displayName),
-      hue: 145,
-      videos: state.myVideos || [],
-      currentVideoIndex: state.myVideoIndex,
-      cameraVisible: !state.cameraHidden.me
-    }
-  ].concat(state.fakePeople);
+  const myPerson = {
+    id: "me",
+    name: state.displayName,
+    role: "You",
+    initials: initialsFor(state.displayName),
+    hue: 145,
+    videos: state.myVideos || [],
+    currentVideoIndex: state.myVideoIndex,
+    cameraVisible: !state.cameraHidden.me
+  };
+  const allPeople = (state.myParticipantHidden ? [] : [myPerson]).concat(state.fakePeople);
 
   const tiles = allPeople.map(participantTile).join("");
 
@@ -952,14 +955,13 @@ function wireParticipantVideo(video) {
 }
 
 function getRecordingPeople() {
-  return [
-    {
-      id: "me",
-      name: state.displayName,
-      initials: initialsFor(state.displayName),
-      hue: 145
-    }
-  ].concat(state.fakePeople);
+  const me = {
+    id: "me",
+    name: state.displayName,
+    initials: initialsFor(state.displayName),
+    hue: 145
+  };
+  return (state.myParticipantHidden ? [] : [me]).concat(state.fakePeople);
 }
 
 function roundedRectPath(ctx, x, y, w, h, radius) {
