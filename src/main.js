@@ -116,11 +116,13 @@ function togglePersonCamera(personId) {
   if (personId === "me") {
     state.cameraHidden.me = !state.cameraHidden.me;
     state.cameraOn = !state.cameraHidden.me;
-    return;
+  } else {
+    const person = getParticipant(personId);
+    if (!person) return;
+    person.cameraVisible = person.cameraVisible === false;
   }
-  const person = getParticipant(personId);
-  if (!person) return;
-  person.cameraVisible = person.cameraVisible === false;
+  updateParticipantTile(personId);
+  updateParticipantsListOnly();
 }
 
 function advancePersonVideo(personId) {
@@ -129,13 +131,16 @@ function advancePersonVideo(personId) {
     state.myVideoIndex = (state.myVideoIndex + 1) % state.myVideos.length;
     state.cameraHidden.me = false;
     state.cameraOn = true;
+    updateParticipantTile("me");
+    updateParticipantsListOnly();
     return;
   }
   const person = getParticipant(personId);
   if (!person || !Array.isArray(person.videos) || person.videos.length < 2) return;
   person.currentVideoIndex = ((person.currentVideoIndex || 0) + 1) % person.videos.length;
   person.cameraVisible = true;
-}
+  updateParticipantTile(personId);
+  updateParticipantsListOnly();
 
 function setPersonKeybind(personId, key) {
   const normalized = String(key || "").trim().toLowerCase();
@@ -277,10 +282,58 @@ function participantTile(person) {
   const keyBadge = keybind ? '<span class="keybind-badge">Cam ' + escapeHtml(keybind.toUpperCase()) + '</span>' : "";
   const nextBadge = nextKey ? '<span class="next-key-badge">Next ' + escapeHtml(nextKey.toUpperCase()) + '</span>' : "";
   const hiddenBadge = !isCameraVisible(person) && getVideos(person).length ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
-  return '<article class="participant-tile">' + media + '<div class="tile-scrim"></div>' + hiddenBadge +
+  return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + hiddenBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
     (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' + keyBadge + nextBadge +
     '<button class="tile-menu" data-action="edit-person" data-person-id="' + person.id + '" title="Edit participant">' + icon("more") + '</button></article>';
+}
+
+
+
+function updateParticipantTile(personId) {
+  const person = getParticipant(personId);
+  if (!person) return;
+
+  const tile = Array.from(document.querySelectorAll(".participant-tile")).find(function(el) {
+    return el.dataset.personId === personId;
+  });
+  if (!tile) return;
+
+  const oldVideo = tile.querySelector("video.participant-video");
+  const oldTime = oldVideo && Number.isFinite(oldVideo.currentTime) ? oldVideo.currentTime : 0;
+  const wasPaused = oldVideo ? oldVideo.paused : false;
+
+  const replacement = document.createElement("div");
+  replacement.innerHTML = participantTile(person);
+  const newTile = replacement.firstElementChild;
+  tile.replaceWith(newTile);
+
+  const newVideo = newTile.querySelector("video.participant-video");
+  if (newVideo) {
+    newVideo.volume = 1;
+    const isSameSource = oldVideo && (oldVideo.currentSrc || oldVideo.src) === (newVideo.currentSrc || newVideo.src);
+    if (isSameSource && oldTime > 0) {
+      newVideo.addEventListener("loadedmetadata", function restoreTime() {
+        try {
+          newVideo.currentTime = Math.min(oldTime, Math.max(0, newVideo.duration - 0.05));
+        } catch (error) {}
+        if (!wasPaused) newVideo.play().catch(function(){});
+      }, { once: true });
+    } else {
+      newVideo.play().catch(function(){});
+    }
+  }
+}
+
+function updateParticipantsListOnly() {
+  if (!state.participantsOpen) return;
+  const panel = document.querySelector(".participants-panel");
+  if (!panel) return;
+  const replacement = document.createElement("div");
+  replacement.innerHTML = renderParticipants();
+  const newPanel = replacement.firstElementChild;
+  panel.replaceWith(newPanel);
+  bind();
 }
 
 function renderMeeting() {
@@ -411,7 +464,6 @@ function openParticipantEditor(personId) {
     nextButton.addEventListener("click", function() {
       advancePersonVideo(personId);
       modal.remove();
-      render();
     });
   }
 
@@ -540,7 +592,8 @@ function openFakeCameraPicker() {
     state.myVideoIndex = state.myVideos.length ? state.myVideoIndex % state.myVideos.length : 0;
     state.cameraOn = true;
     state.cameraHidden.me = false;
-    render();
+    updateParticipantTile("me");
+    updateParticipantsListOnly();
   };
   input.click();
 }
@@ -553,7 +606,13 @@ function bind() {
     el.addEventListener("click", function(){
       const a = el.dataset.action;
       if (a === "toggle-mic") state.micOn = !state.micOn;
-      if (a === "toggle-camera") state.cameraOn = !state.cameraOn;
+      if (a === "toggle-camera") {
+        state.cameraOn = !state.cameraOn;
+        state.cameraHidden.me = !state.cameraOn;
+        updateParticipantTile("me");
+        updateParticipantsListOnly();
+        return;
+      }
       if (a === "toggle-participants") state.participantsOpen = !state.participantsOpen;
       if (a === "toggle-chat") state.chatOpen = !state.chatOpen;
       if (a === "toggle-share") state.shareOn = !state.shareOn;
@@ -589,7 +648,6 @@ function bind() {
       if (!person) return;
       if (getVideos(person).length > 1) {
         advancePersonVideo(personId);
-        render();
       }
     });
     v.play().catch(function(){});
@@ -610,7 +668,6 @@ window.addEventListener("keydown", function(e) {
   if (cameraPersonId) {
     e.preventDefault();
     togglePersonCamera(cameraPersonId);
-    render();
     return;
   }
 
@@ -620,7 +677,6 @@ window.addEventListener("keydown", function(e) {
   if (nextPersonId) {
     e.preventDefault();
     advancePersonVideo(nextPersonId);
-    render();
   }
 });
 
