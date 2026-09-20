@@ -388,6 +388,8 @@ function leavePerson(personId) {
   const index = state.fakePeople.findIndex(function(p) { return p.id === personId; });
   if (index < 0) return false;
 
+  playLeaveSound();
+
   const person = state.fakePeople[index];
   revokeVideos(person.videos);
   state.fakePeople.splice(index, 1);
@@ -396,7 +398,6 @@ function leavePerson(personId) {
   delete state.audioKeybinds[personId];
   delete state.leaveKeybinds[personId];
   normalizeHosts();
-  playLeaveSound();
 
   const tile = document.querySelector('.participant-tile[data-person-id="' + personId + '"]');
   if (tile) tile.remove();
