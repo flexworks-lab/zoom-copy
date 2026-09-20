@@ -1,5 +1,5 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
+import { fetchFile } from "@ffmpeg/util";
 
 import "./style.css";
 
@@ -43,6 +43,8 @@ const state = {
   audioEnabled: true,
   audioPlaying: false,
   recording: false,
+  recordingBusy: false,
+  recordingProgress: 0,
   myParticipantHidden: false,
   myAvatarUrl: null,
   participantSearch: ""
@@ -58,7 +60,9 @@ const recordingState = {
   audioDestination: null,
   mediaSources: new Map(),
   ffmpeg: null,
-  ffmpegLoading: false
+  ffmpegLoading: false,
+  recordingProgress: 0,
+  sourceStream: null
 };
 
 const icons = {
@@ -1357,6 +1361,7 @@ async function syncRecordingAudio() {
     try {
       const source = recordingState.audioContext.createMediaElementSource(video);
       source.connect(recordingState.audioDestination);
+      source.connect(recordingState.audioContext.destination);
       recordingState.mediaSources.set(video, source);
     } catch (error) {}
   }
@@ -1368,15 +1373,31 @@ async function syncRecordingAudio() {
 
 function updateRecordingControls() {
   document.querySelectorAll('[data-action="toggle-recording"]').forEach(function(button) {
+    const processing = state.recordingBusy && !state.recording;
     button.classList.toggle("recording-active", state.recording);
-    button.innerHTML = icon(state.recording ? "stop" : "record") + '<span>' + (state.recording ? "Stop Recording" : "Record") + '</span>';
+    button.classList.toggle("recording-processing", processing);
+    button.disabled = processing;
+    button.setAttribute("aria-busy", processing ? "true" : "false");
+
+    let label = "Record";
+    let buttonIcon = "record";
+    if (state.recording) {
+      label = "Stop Recording";
+      buttonIcon = "stop";
+    } else if (processing) {
+      const percent = Math.max(0, Math.min(100, Math.round(state.recordingProgress || 0)));
+      label = percent ? "MP4 " + percent + "%" : "Making MP4…";
+      buttonIcon = "record";
+    }
+
+    button.innerHTML = icon(buttonIcon) + "<span>" + label + "</span>";
   });
 }
 
 async function startRecording() {
-  if (state.recording || state.page !== "meeting") return;
-  const hasMediaRecorder = typeof MediaRecorder !== "undefined";
-  if (!hasMediaRecorder) {
+  if (state.recording || state.recordingBusy || state.page !== "meeting") return;
+
+  if (typeof MediaRecorder === "undefined") {
     alert("This browser does not support meeting recording.");
     return;
   }
@@ -1384,7 +1405,8 @@ async function startRecording() {
   const canvas = document.createElement("canvas");
   canvas.width = 1280;
   canvas.height = 720;
-  const context = canvas.getContext("2d");
+
+  const context = canvas.getContext("2d", { alpha: false, desynchronized: true });
   if (!context) {
     alert("Could not create the meeting recording canvas.");
     return;
@@ -1393,34 +1415,61 @@ async function startRecording() {
   recordingState.canvas = canvas;
   recordingState.context = context;
   recordingState.chunks = [];
-  recordingState.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  recordingState.audioDestination = recordingState.audioContext.createMediaStreamDestination();
+  recordingState.recordingProgress = 0;
+  state.recordingProgress = 0;
 
-  await syncRecordingAudio();
-  try { await recordingState.audioContext.resume(); } catch (error) {}
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (AudioContextClass) {
+    recordingState.audioContext = new AudioContextClass();
+    recordingState.audioDestination = recordingState.audioContext.createMediaStreamDestination();
+
+    await syncRecordingAudio();
+    try { await recordingState.audioContext.resume(); } catch (error) {}
+  }
 
   const canvasStream = canvas.captureStream(30);
   const stream = new MediaStream();
+  recordingState.sourceStream = stream;
+
   const videoTrack = canvasStream.getVideoTracks()[0];
   if (videoTrack) stream.addTrack(videoTrack);
-  const audioTrack = recordingState.audioDestination.stream.getAudioTracks()[0];
-  if (audioTrack) stream.addTrack(audioTrack);
 
-  const mimeTypes = [
+  if (recordingState.audioDestination) {
+    const audioTrack = recordingState.audioDestination.stream.getAudioTracks()[0];
+    if (audioTrack) stream.addTrack(audioTrack);
+  }
+
+  const directMp4Types = [
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4"
+  ];
+  const webmTypes = [
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm"
   ];
-  const mimeType = mimeTypes.find(function(type) {
+  const directMp4Type = directMp4Types.find(function(type) {
     return MediaRecorder.isTypeSupported(type);
-  }) || "";
+  });
+  const webmType = webmTypes.find(function(type) {
+    return MediaRecorder.isTypeSupported(type);
+  });
+  const mimeType = directMp4Type || webmType || "";
 
   try {
     recordingState.recorder = mimeType
-      ? new MediaRecorder(stream, { mimeType: mimeType })
-      : new MediaRecorder(stream);
+      ? new MediaRecorder(stream, {
+          mimeType: mimeType,
+          videoBitsPerSecond: 6_000_000,
+          audioBitsPerSecond: 128_000
+        })
+      : new MediaRecorder(stream, {
+          videoBitsPerSecond: 6_000_000,
+          audioBitsPerSecond: 128_000
+        });
   } catch (error) {
     recordingState.recorder = null;
+    cleanupRecording();
     alert("Could not start meeting recording in this browser.");
     return;
   }
@@ -1432,111 +1481,115 @@ async function startRecording() {
   recordingState.recorder.onstop = async function() {
     const chunks = recordingState.chunks.slice();
     const sourceType = recordingState.recorder && recordingState.recorder.mimeType || mimeType || "video/webm";
-    await finishRecording(chunks, sourceType);
-  };
-
-  recordingState.recorder.onerror = function() {
-    state.recording = false;
-    cancelAnimationFrame(recordingState.animationFrame);
-    cleanupRecording();
-    updateRecordingControls();
-    alert("The meeting recording stopped because the browser reported an error.");
-  };
-
-  state.recording = true;
-  updateRecordingControls();
-  drawRecordingFrame();
-  recordingState.recorder.start(1000);
-  syncAudioIndicator();
-}
-
-async function stopRecording() {
-  if (!state.recording || !recordingState.recorder) return;
-  state.recording = false;
-  updateRecordingControls();
-  cancelAnimationFrame(recordingState.animationFrame);
-  try {
-    recordingState.recorder.stop();
-  } catch (error) {
-    cleanupRecording();
-  }
-}
-
-async function finishRecording(chunks, sourceType) {
-  const sourceBlob = new Blob(chunks, { type: sourceType || "video/webm" });
-  let conversionError = null;
+    await finishRecording(chunks, sourceTasync function finishRecording(chunks, sourceType) {
+  const normalizedType = String(sourceType || "video/webm").toLowerCase();
+  const isDirectMp4 = normalizedType.indexOf("video/mp4") === 0;
+  const sourceBlob = new Blob(chunks, { type: normalizedType });
 
   try {
+    if (isDirectMp4) {
+      downloadRecordingFile(sourceBlob, "mp4");
+      return;
+    }
+
     const ffmpeg = await getRecordingFFmpeg();
+    state.recordingProgress = 8;
+    updateRecordingControls();
 
     try { await ffmpeg.deleteFile("meeting.webm"); } catch (error) {}
     try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
 
     await ffmpeg.writeFile("meeting.webm", await fetchFile(sourceBlob));
+    state.recordingProgress = 20;
+    updateRecordingControls();
 
-    // First use explicit codecs so the output is a real H.264/AAC MP4.
+    let converted = false;
+    let firstError = null;
+
     try {
       await ffmpeg.exec([
         "-threads", "1",
         "-i", "meeting.webm",
         "-c:v", "libx264",
-        "-preset", "ultrafast",
+        "-preset", "veryfast",
+        "-crf", "23",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "128k",
         "-movflags", "+faststart",
+        "-f", "mp4",
         "meeting.mp4"
       ]);
-    } catch (firstError) {
-      conversionError = firstError;
-      // Some FFmpeg builds choose their compiled-in MP4 codecs more reliably
-      // when no explicit encoder is forced, so retry with FFmpeg defaults.
+      converted = true;
+    } catch (error) {
+      firstError = error;
       try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
-      await ffmpeg.exec([
-        "-threads", "1",
-        "-i", "meeting.webm",
-        "-movflags", "+faststart",
-        "meeting.mp4"
-      ]);
+    }
+
+    if (!converted) {
+      try {
+        await ffmpeg.exec([
+          "-threads", "1",
+          "-i", "meeting.webm",
+          "-c:v", "mpeg4",
+          "-q:v", "5",
+          "-c:a", "aac",
+          "-b:a", "128k",
+          "-movflags", "+faststart",
+          "-f", "mp4",
+          "meeting.mp4"
+        ]);
+        converted = true;
+      } catch (error) {
+        console.error("Primary MP4 encoder failed", firstError, error);
+      }
+    }
+
+    if (!converted) {
+      throw new Error("The bundled FFmpeg encoder could not create an MP4.");
     }
 
     const data = await ffmpeg.readFile("meeting.mp4");
-    if (!data || !data.length) throw new Error("FFmpeg produced an empty MP4 file.");
+    const byteLength = data && data.byteLength != null ? data.byteLength : data.length;
+    if (!data || !byteLength) throw new Error("FFmpeg produced an empty MP4 file.");
 
-    const mp4Blob = new Blob([data], { type: "video/mp4" });
-    const url = URL.createObjectURL(mp4Blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "zoom-copy-meeting-" + new Date().toISOString().replace(/[:.]/g, "-") + ".mp4";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+    state.recordingProgress = 96;
+    updateRecordingControls();
+
+    const mp4Blob = new Blob([data.buffer || data], { type: "video/mp4" });
+    downloadRecordingFile(mp4Blob, "mp4");
 
     try { await ffmpeg.deleteFile("meeting.webm"); } catch (error) {}
     try { await ffmpeg.deleteFile("meeting.mp4"); } catch (error) {}
   } catch (error) {
-    console.error("Meeting recording conversion failed", error, conversionError);
-    const fallbackUrl = URL.createObjectURL(sourceBlob);
-    const link = document.createElement("a");
-    link.href = fallbackUrl;
-    link.download = "zoom-copy-meeting-recording.webm";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(function() { URL.revokeObjectURL(fallbackUrl); }, 60000);
-
-    const detail = error && error.message ? " " + error.message : "";
-    alert("MP4 conversion failed." + detail + " The WebM recording was saved instead.");
+    console.error("Meeting MP4 conversion failed", error);
+    alert("The recording could not be converted to MP4. No WebM file was downloaded.");
   } finally {
+    state.recordingBusy = false;
+    state.recordingProgress = 0;
+    recordingState.recordingProgress = 0;
     cleanupRecording();
     updateRecordingControls();
     syncAudioIndicator();
   }
 }
 
+function downloadRecordingFile(blob, extension) {
+  if (!blob || !blob.size) throw new Error("The recording file is empty.");
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "zoom-copy-meeting-" + new Date().toISOString().replace(/[:.]/g, "-") + "." + extension;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
+}
+
 async function getRecordingFFmpeg() {
   if (recordingState.ffmpeg) return recordingState.ffmpeg;
+
   if (recordingState.ffmpegLoading) {
     while (recordingState.ffmpegLoading && !recordingState.ffmpeg) {
       await new Promise(function(resolve) { setTimeout(resolve, 100); });
@@ -1545,16 +1598,26 @@ async function getRecordingFFmpeg() {
   }
 
   recordingState.ffmpegLoading = true;
+
   try {
     const ffmpeg = new FFmpeg();
     ffmpeg.on("log", function(event) {
       console.debug("[FFmpeg]", event.message);
     });
-    const baseURL = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
-    await ffmpeg.load({
-      coreURL: await toBlobURL(baseURL + "/ffmpeg-core.js", "text/javascript"),
-      wasmURL: await toBlobURL(baseURL + "/ffmpeg-core.wasm", "application/wasm")
+    ffmpeg.on("progress", function(event) {
+      if (!state.recordingBusy) return;
+      const progress = Number(event && event.progress);
+      if (!Number.isFinite(progress)) return;
+      state.recordingProgress = Math.max(20, Math.min(94, Math.round(20 + progress * 74)));
+      recordingState.recordingProgress = state.recordingProgress;
+      updateRecordingControls();
     });
+
+    await ffmpeg.load({
+      coreURL: "./ffmpeg/ffmpeg-core.js",
+      wasmURL: "./ffmpeg/ffmpeg-core.wasm"
+    });
+
     recordingState.ffmpeg = ffmpeg;
     return ffmpeg;
   } finally {
@@ -1574,15 +1637,25 @@ function cleanupRecording() {
     try { source.disconnect(); } catch (error) {}
   });
   recordingState.mediaSources.clear();
+
   if (recordingState.audioContext) {
     try { recordingState.audioContext.close(); } catch (error) {}
   }
+
+  if (recordingState.sourceStream) {
+    recordingState.sourceStream.getTracks().forEach(function(track) {
+      try { track.stop(); } catch (error) {}
+    });
+  }
+
   recordingState.recorder = null;
   recordingState.audioContext = null;
   recordingState.audioDestination = null;
+  recordingState.sourceStream = null;
   recordingState.canvas = null;
   recordingState.context = null;
   recordingState.chunks = [];
+  recordingState.recordingProgress = 0;
 }
 
 function syncAudioIndicator() {
