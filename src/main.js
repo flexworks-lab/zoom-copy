@@ -1161,14 +1161,31 @@ function getRecordingAvatarImage(person) {
     recordingAvatarImages.set(person.id, entry);
     image.onload = function() {
       entry.ready = true;
+      entry.failed = false;
     };
     image.onerror = function() {
       entry.ready = false;
+      entry.failed = true;
     };
     image.src = url;
   }
 
-  return entry.ready ? entry.image : null;
+  if (!entry || entry.failed || !entry.ready || !entry.image || !entry.image.complete || !entry.image.naturalWidth || !entry.image.naturalHeight) {
+    return null;
+  }
+
+  return entry.image;
+}
+
+function safeDrawRecordingAvatarImage(ctx, image, x, y, width, height) {
+  if (!ctx || !image || !image.complete || !image.naturalWidth || !image.naturalHeight) return false;
+  try {
+    ctx.drawImage(image, x, y, width, height);
+    return true;
+  } catch (error) {
+    console.warn("Participant PFP could not be drawn into the recording. Falling back to initials.", error);
+    return false;
+  }
 }
 
 function drawRecordingAvatar(ctx, person, x, y, w, h) {
@@ -1188,8 +1205,24 @@ function drawRecordingAvatar(ctx, person, x, y, w, h) {
     ctx.beginPath();
     ctx.arc(cx, cy, diameter / 2, 0, Math.PI * 2);
     ctx.clip();
-    ctx.drawImage(avatarImage, cx - diameter / 2, cy - diameter / 2, diameter, diameter);
+    const drewAvatar = safeDrawRecordingAvatarImage(
+      ctx,
+      avatarImage,
+      cx - diameter / 2,
+      cy - diameter / 2,
+      diameter,
+      diameter
+    );
     ctx.restore();
+
+    if (!drewAvatar) {
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "800 " + Math.max(28, Math.min(w, h) * 0.15) + "px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(person.initials || "GU", cx, cy);
+      return;
+    }
 
     ctx.strokeStyle = "rgba(255,255,255,.92)";
     ctx.lineWidth = 3;
@@ -1498,9 +1531,11 @@ function drawRecordingFrame() {
           ctx.beginPath();
           ctx.arc(px + 31, py + 16, 15, 0, Math.PI * 2);
           ctx.clip();
-          ctx.drawImage(meAvatar, px + 16, py + 1, 30, 30);
+          const drewMeAvatar = safeDrawRecordingAvatarImage(ctx, meAvatar, px + 16, py + 1, 30, 30);
           ctx.restore();
-        } else {
+          if (!drewMeAvatar) meAvatar = null;
+        }
+        if (!meAvatar) {
           ctx.fillStyle = "#ffffff";
           ctx.font = "800 10px system-ui, sans-serif";
           ctx.textAlign = "center";
@@ -1530,9 +1565,11 @@ function drawRecordingFrame() {
           ctx.beginPath();
           ctx.arc(px + 31, py + 16, 15, 0, Math.PI * 2);
           ctx.clip();
-          ctx.drawImage(recordingAvatar, px + 16, py + 1, 30, 30);
+          const drewPersonAvatar = safeDrawRecordingAvatarImage(ctx, recordingAvatar, px + 16, py + 1, 30, 30);
           ctx.restore();
-        } else {
+          if (!drewPersonAvatar) recordingAvatar = null;
+        }
+        if (!recordingAvatar) {
           ctx.fillStyle = "#ffffff";
           ctx.font = "800 10px system-ui, sans-serif";
           ctx.textAlign = "center";
