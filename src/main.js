@@ -115,28 +115,6 @@ function normalizeHosts() {
   });
 }
 
-function getVideos(person) {
-  if (!person) return [];
-  if (person.id === "me") return state.myVideos || [];
-  if (Array.isArray(person.videos)) return person.videos;
-  if (person.videoUrl) return [{ url: person.videoUrl, name: "Video" }];
-  return [];
-}
-
-function getCurrentVideoUrl(person) {
-  const videos = getVideos(person);
-  if (!videos.length) return null;
-  const rawIndex = person.id === "me" ? state.myVideoIndex : (person.currentVideoIndex || 0);
-  const index = Math.max(0, Math.min(rawIndex, videos.length - 1));
-  return videos[index]?.url || null;
-}
-
-function isCameraVisible(person) {
-  if (!person) return false;
-  if (person.id === "me") return !state.cameraHidden.me && state.cameraOn;
-  return person.cameraVisible !== false;
-}
-
 function isPersonAudioOn(person) {
   if (!person) return false;
   return person.id === "me" ? state.myAudioOn : person.audioOn !== false;
@@ -488,10 +466,6 @@ function renderParticipants() {
 function renderChat() {
   return '<aside class="side-panel chat-panel"><div class="panel-header"><div><strong>Meeting Chat</strong><span>Everyone</span></div><button class="panel-close" data-action="toggle-chat">×</button></div><div class="chat-messages">' +
     '<div class="chat-msg"><strong>Jamie Lee</strong><p>Ready when you are.</p></div><div class="chat-msg"><strong>Sam Rivera</strong><p>I added the notes to the agenda.</p></div></div><div class="chat-input"><input placeholder="Type a message..."><button>Send</button></div></aside>';
-}
-
-function openAddPerson() {
-  openParticipantEditor(null);
 }
 
 function openAddPerson() {
