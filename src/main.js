@@ -45,6 +45,8 @@ const state = {
   recording: false,
   recordingBusy: false,
   recordingProgress: 0,
+  recordingNumber: 0,
+  recordingElapsedMs: 0,
   myParticipantHidden: false,
   myAvatarUrl: null,
   participantSearch: ""
@@ -67,7 +69,9 @@ const recordingState = {
   ffmpeg: null,
   ffmpegLoading: false,
   recordingProgress: 0,
-  sourceStream: null
+  sourceStream: null,
+  startedAt: 0,
+  timer: 0
 };
 
 const icons = {
@@ -1584,6 +1588,34 @@ async function syncRecordingAudio() {
   }
 }
 
+function formatRecordingTime(ms) {
+  const totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = function(value) { return String(value).padStart(2, "0"); };
+  return hours > 0 ? hours + ":" + pad(minutes) + ":" + pad(seconds) : pad(minutes) + ":" + pad(seconds);
+}
+
+function startRecordingTimer() {
+  if (recordingState.timer) clearInterval(recordingState.timer);
+  recordingState.startedAt = Date.now();
+  state.recordingElapsedMs = 0;
+
+  recordingState.timer = setInterval(function() {
+    if (!state.recording || !recordingState.startedAt) return;
+    state.recordingElapsedMs = Date.now() - recordingState.startedAt;
+    updateRecordingControls();
+  }, 250);
+}
+
+function stopRecordingTimer() {
+  if (recordingState.timer) {
+    clearInterval(recordingState.timer);
+    recordingState.timer = 0;
+  }
+}
+
 function updateRecordingControls() {
   document.querySelectorAll('[data-action="toggle-recording"]').forEach(function(button) {
     const processing = state.recordingBusy && !state.recording;
@@ -1594,16 +1626,18 @@ function updateRecordingControls() {
 
     let label = "Record";
     let buttonIcon = "record";
+    let runtime = "";
     if (state.recording) {
       label = "Stop Recording";
       buttonIcon = "stop";
+      runtime = '<small class="recording-runtime">' + formatRecordingTime(state.recordingElapsedMs) + '</small>';
     } else if (processing) {
       const percent = Math.max(0, Math.min(100, Math.round(state.recordingProgress || 0)));
       label = percent ? "MP4 " + percent + "%" : "Making MP4…";
       buttonIcon = "record";
     }
 
-    button.innerHTML = icon(buttonIcon) + "<span>" + label + "</span>";
+    button.innerHTML = icon(buttonIcon) + "<span>" + label + "</span>" + runtime;
   });
 }
 
@@ -1630,6 +1664,8 @@ async function startRecording() {
   recordingState.chunks = [];
   recordingState.recordingProgress = 0;
   state.recordingProgress = 0;
+  state.recordingNumber += 1;
+  state.recordingElapsedMs = 0;
 
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (AudioContextClass) {
@@ -1702,6 +1738,7 @@ async function startRecording() {
   recordingState.recorder.onerror = function(event) {
     console.error("Meeting recorder error", event.error || event);
     state.recording = false;
+    stopRecordingTimer();
     state.recordingBusy = false;
     cancelAnimationFrame(recordingState.animationFrame);
     cleanupRecording();
@@ -1711,6 +1748,7 @@ async function startRecording() {
 
   state.recording = true;
   state.recordingBusy = false;
+  startRecordingTimer();
   updateRecordingControls();
   drawRecordingFrame();
 
@@ -1735,6 +1773,7 @@ async function stopRecording() {
   if (!state.recording || !recordingState.recorder) return;
 
   state.recording = false;
+  stopRecordingTimer();
   state.recordingBusy = true;
   state.recordingProgress = 0;
   updateRecordingControls();
@@ -1848,7 +1887,8 @@ function downloadRecordingFile(blob, extension) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "zoom-copy-meeting-" + new Date().toISOString().replace(/[:.]/g, "-") + "." + extension;
+  const recordingNumber = Math.max(1, Number(state.recordingNumber) || 1);
+  link.download = "zoom-copy-meeting-recording-" + recordingNumber + "-" + new Date().toISOString().replace(/[:.]/g, "-") + "." + extension;
   document.body.appendChild(link);
   link.click();
   link.remove();
@@ -1894,6 +1934,7 @@ async function getRecordingFFmpeg() {
 }
 
 function cleanupRecording() {
+  stopRecordingTimer();
   if (recordingState.animationFrame) {
     cancelAnimationFrame(recordingState.animationFrame);
     recordingState.animationFrame = 0;
