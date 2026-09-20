@@ -371,10 +371,17 @@ function setLeaveKeybind(personId, key) {
   state.leaveKeybinds[personId] = normalized;
 }
 
+const leaveSound = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
+leaveSound.preload = "auto";
+leaveSound.volume = 0.74;
+
 function playLeaveSound() {
-  const audio = new Audio("./FaceTime%20End%20Call%20Sound%20Effect.mp3");
-  audio.volume = 0.9;
-  audio.play().catch(function() {});
+  try {
+    leaveSound.pause();
+    leaveSound.currentTime = 0;
+  } catch (error) {}
+
+  leaveSound.play().catch(function() {});
 }
 
 function leavePerson(personId) {
