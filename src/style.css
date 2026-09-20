@@ -103,3 +103,5 @@ button{border:0;cursor:pointer}
 .muted-audio-badge svg{width:12px;height:12px}
 
 .control-btn.audio-playing{outline:1px solid #2d8cff;outline-offset:-1px;box-shadow:0 0 0 2px rgba(45,140,255,.12)}
+
+.recording-active{color:#ff6f77!important;background:rgba(223,62,72,.12)!important;outline:1px solid rgba(223,62,72,.55);outline-offset:-1px}
