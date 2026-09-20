@@ -977,15 +977,32 @@ function openParticipantEditor(personId) {
 
   document.body.appendChild(modal);
   const form = modal.querySelector("form");
+  const submitButton = form.querySelector('button[type="submit"]');
+  let modalClosed = false;
+  let saving = false;
 
-  modal.querySelectorAll("[data-close]").forEach(function(b) { b.addEventListener("click", function() { modal.remove(); }); });
-  modal.addEventListener("click", function(e) { if (e.target === modal) modal.remove(); });
+  function closeModal() {
+    if (modalClosed) return;
+    modalClosed = true;
+    modal.remove();
+  }
+
+  modal.querySelectorAll("[data-close]").forEach(function(b) {
+    b.addEventListener("click", function(e) {
+      e.preventDefault();
+      closeModal();
+    });
+  });
+
+  modal.addEventListener("click", function(e) {
+    if (e.target === modal) closeModal();
+  });
 
   const nextButton = modal.querySelector("[data-next-video]");
   if (nextButton) {
     nextButton.addEventListener("click", function() {
       advancePersonVideo(personId);
-      modal.remove();
+      closeModal();
     });
   }
 
@@ -1004,7 +1021,7 @@ function openParticipantEditor(personId) {
         person.currentVideoIndex = 0;
         person.needsNextOnCamera = false;
       }
-      modal.remove();
+      closeModal();
       render();
     });
   }
@@ -1023,7 +1040,7 @@ function openParticipantEditor(personId) {
       delete state.audioKeybinds[personId];
       delete state.leaveKeybinds[personId];
       normalizeHosts();
-      modal.remove();
+      closeModal();
       render();
     });
   }
@@ -1043,107 +1060,125 @@ function openParticipantEditor(personId) {
 
   form.addEventListener("submit", function(e) {
     e.preventDefault();
-    const fd = new FormData(form);
-    const name = String(fd.get("name") || "").trim() || "Guest";
-    const files = fd.getAll("video");
-    const avatarFile = fd.get("avatar");
-    const clearVideos = form.querySelector('[name="clearVideos"]').checked;
-    const clearAvatarInput = form.querySelector('[name="clearAvatar"]');
-    const clearAvatar = clearAvatarInput ? clearAvatarInput.checked : false;
-    const hasAvatarFile = avatarFile instanceof File && avatarFile.size > 0;
-    const autoPlay = form.querySelector('[name="autoPlayNext"]').checked;
-    const key = String(fd.get("keybind") || "").trim();
-    const nextKey = String(fd.get("nextKeybind") || "").trim();
-    const audioKey = String(fd.get("audioKeybind") || "").trim();
-    const leaveKey = String(fd.get("leaveKeybind") || "").trim();
-    const autoCameraOff = form.querySelector('[name="autoCameraOff"]').checked;
+    if (modalClosed || saving) return;
 
-    if (isNew) {
-      const newPerson = {
-        id: crypto.randomUUID(),
-        name: name,
-        avatarUrl: hasAvatarFile ? URL.createObjectURL(avatarFile) : null,
-        role: "",
-        initials: initialsFor(name),
-        hue: Math.floor(Math.random() * 360),
-        videos: [],
-        currentVideoIndex: 0,
-        cameraVisible: true,
-        autoPlayNext: autoPlay,
-        autoCameraOff: autoCameraOff,
-        audioOn: true,
-        needsNextOnCamera: false
-      };
-      addVideoFiles(newPerson, files);
-      state.fakePeople.push(newPerson);
-      normalizeHosts();
-      setPersonKeybind(newPerson.id, key);
-      setNextKeybind(newPerson.id, nextKey);
-      setAudioKeybind(newPerson.id, audioKey);
-      setLeaveKeybind(newPerson.id, leaveKey);
-    } else if (isMe) {
-      state.displayName = name;
-      if (clearAvatar) {
-        revokeBlob(state.myAvatarUrl);
-        state.myAvatarUrl = null;
-      } else if (hasAvatarFile) {
-        revokeBlob(state.myAvatarUrl);
-        state.myAvatarUrl = URL.createObjectURL(avatarFile);
-      }
-      state.myAutoPlayNext = autoPlay;
-      state.myAutoCameraOff = autoCameraOff;
-      if (clearVideos) {
-        revokeVideos(state.myVideos);
-        state.myVideos = [];
-        state.myVideoIndex = 0;
-        state.cameraOn = false;
-        state.cameraHidden.me = true;
-        state.needsNextOnCamera = false;
-      } else {
-        addVideoFiles({ id: "me" }, files);
-        if (state.myVideos.length) {
-          state.cameraOn = true;
-          state.cameraHidden.me = false;
-          state.needsNextOnCamera = false;
-        }
-      }
-      setPersonKeybind("me", key);
-      setNextKeybind("me", nextKey);
-      setAudioKeybind("me", audioKey);
-      setLeaveKeybind("me", leaveKey);
-    } else {
-      const target = state.fakePeople.find(function(p) { return p.id === personId; });
-      if (!target) return;
-      target.name = name;
-      target.initials = initialsFor(name);
-      if (clearAvatar) {
-        revokeBlob(target.avatarUrl);
-        target.avatarUrl = null;
-      } else if (hasAvatarFile) {
-        revokeBlob(target.avatarUrl);
-        target.avatarUrl = URL.createObjectURL(avatarFile);
-      }
-      target.autoPlayNext = autoPlay;
-      target.autoCameraOff = autoCameraOff;
-      if (clearVideos) {
-        revokeVideos(target.videos);
-        target.videos = [];
-        target.currentVideoIndex = 0;
-        target.needsNextOnCamera = false;
-      } else {
-        addVideoFiles(target, files);
-      }
-      if (target.videos.length) target.cameraVisible = true;
-      setPersonKeybind(personId, key);
-      setNextKeybind(personId, nextKey);
-      setAudioKeybind(personId, audioKey);
-      setLeaveKeybind(personId, leaveKey);
-      normalizeHosts();
+    saving = true;
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.dataset.originalText = submitButton.textContent || "";
+      submitButton.textContent = isNew ? "Adding…" : "Saving…";
     }
 
-    modal.remove();
-    render();
-    if (state.recording) syncRecordingAudio();
+    try {
+      const fd = new FormData(form);
+      const name = String(fd.get("name") || "").trim() || "Guest";
+      const files = fd.getAll("video");
+      const avatarFile = fd.get("avatar");
+      const clearVideos = form.querySelector('[name="clearVideos"]').checked;
+      const clearAvatarInput = form.querySelector('[name="clearAvatar"]');
+      const clearAvatar = clearAvatarInput ? clearAvatarInput.checked : false;
+      const hasAvatarFile = avatarFile instanceof File && avatarFile.size > 0;
+      const autoPlay = form.querySelector('[name="autoPlayNext"]').checked;
+      const key = String(fd.get("keybind") || "").trim();
+      const nextKey = String(fd.get("nextKeybind") || "").trim();
+      const audioKey = String(fd.get("audioKeybind") || "").trim();
+      const leaveKey = String(fd.get("leaveKeybind") || "").trim();
+      const autoCameraOff = form.querySelector('[name="autoCameraOff"]').checked;
+
+      if (isNew) {
+        const newPerson = {
+          id: crypto.randomUUID(),
+          name: name,
+          avatarUrl: hasAvatarFile ? URL.createObjectURL(avatarFile) : null,
+          role: "",
+          initials: initialsFor(name),
+          hue: Math.floor(Math.random() * 360),
+          videos: [],
+          currentVideoIndex: 0,
+          cameraVisible: true,
+          autoPlayNext: autoPlay,
+          autoCameraOff: autoCameraOff,
+          audioOn: true,
+          needsNextOnCamera: false
+        };
+        addVideoFiles(newPerson, files);
+        state.fakePeople.push(newPerson);
+        normalizeHosts();
+        setPersonKeybind(newPerson.id, key);
+        setNextKeybind(newPerson.id, nextKey);
+        setAudioKeybind(newPerson.id, audioKey);
+        setLeaveKeybind(newPerson.id, leaveKey);
+      } else if (isMe) {
+        state.displayName = name;
+        if (clearAvatar) {
+          revokeBlob(state.myAvatarUrl);
+          state.myAvatarUrl = null;
+        } else if (hasAvatarFile) {
+          revokeBlob(state.myAvatarUrl);
+          state.myAvatarUrl = URL.createObjectURL(avatarFile);
+        }
+        state.myAutoPlayNext = autoPlay;
+        state.myAutoCameraOff = autoCameraOff;
+        if (clearVideos) {
+          revokeVideos(state.myVideos);
+          state.myVideos = [];
+          state.myVideoIndex = 0;
+          state.cameraOn = false;
+          state.cameraHidden.me = true;
+          state.needsNextOnCamera = false;
+        } else {
+          addVideoFiles({ id: "me" }, files);
+          if (state.myVideos.length) {
+            state.cameraOn = true;
+            state.cameraHidden.me = false;
+            state.needsNextOnCamera = false;
+          }
+        }
+        setPersonKeybind("me", key);
+        setNextKeybind("me", nextKey);
+        setAudioKeybind("me", audioKey);
+        setLeaveKeybind("me", leaveKey);
+      } else {
+        const target = state.fakePeople.find(function(p) { return p.id === personId; });
+        if (!target) throw new Error("This participant no longer exists.");
+
+        target.name = name;
+        target.initials = initialsFor(name);
+        if (clearAvatar) {
+          revokeBlob(target.avatarUrl);
+          target.avatarUrl = null;
+        } else if (hasAvatarFile) {
+          revokeBlob(target.avatarUrl);
+          target.avatarUrl = URL.createObjectURL(avatarFile);
+        }
+        target.autoPlayNext = autoPlay;
+        target.autoCameraOff = autoCameraOff;
+        if (clearVideos) {
+          revokeVideos(target.videos);
+          target.videos = [];
+          target.currentVideoIndex = 0;
+          target.needsNextOnCamera = false;
+        } else {
+          addVideoFiles(target, files);
+        }
+        if (target.videos.length) target.cameraVisible = true;
+        setPersonKeybind(personId, key);
+        setNextKeybind(personId, nextKey);
+        setAudioKeybind(personId, audioKey);
+        setLeaveKeybind(personId, leaveKey);
+        normalizeHosts();
+      }
+
+      closeModal();
+      render();
+      if (state.recording) syncRecordingAudio();
+    } catch (error) {
+      console.error("Participant editor save failed", error);
+      closeModal();
+      alert("The participant could not be saved. Please try again.");
+    } finally {
+      saving = false;
+    }
   });
 
   const nameInput = form.querySelector('[name="name"]');
