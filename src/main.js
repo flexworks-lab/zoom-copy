@@ -596,10 +596,12 @@ function participantTile(person) {
   const cameraKey = state.keybinds[person.id] || "—";
   const nextKey = state.nextKeybinds[person.id] || "—";
   const audioKey = state.audioKeybinds[person.id] || "—";
+  const leaveKey = state.leaveKeybinds[person.id] || "—";
   const keybindBadges =
     '<span class="keybind-badge">Cam:' + escapeHtml(cameraKey.toUpperCase()) + '</span>' +
     '<span class="next-key-badge">Next:' + escapeHtml(nextKey.toUpperCase()) + '</span>' +
-    '<span class="audio-key-badge">Audio:' + escapeHtml(audioKey.toUpperCase()) + '</span>';
+    '<span class="audio-key-badge">Audio:' + escapeHtml(audioKey.toUpperCase()) + '</span>' +
+    '<span class="leave-key-badge">Leave:' + escapeHtml(leaveKey.toUpperCase()) + '</span>';
 
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
