@@ -104,4 +104,4 @@ button{border:0;cursor:pointer}
 
 .control-btn.audio-playing{outline:1px solid #2d8cff;outline-offset:-1px;box-shadow:0 0 0 2px rgba(45,140,255,.12)}
 
-.recording-active{color:#ff6f77!important;background:rgba(223,62,72,.12)!important;outline:1px solid rgba(223,62,72,.55);outline-offset:-1px}.recording-processing{color:#8ebdf5!important;background:rgba(45,140,255,.08)!important;cursor:wait;opacity:.95}.recording-processing:disabled{pointer-events:none}
+.recording-active{color:#ff6f77!important;background:rgba(223,62,72,.12)!important;outline:1px solid rgba(223,62,72,.55);outline-offset:-1px}.recording-runtime{display:block;font-size:8px;line-height:1;color:#ffb0b5;font-variant-numeric:tabular-nums;letter-spacing:.04em;margin-top:-1px}.recording-processing{color:#8ebdf5!important;background:rgba(45,140,255,.08)!important;cursor:wait;opacity:.95}.recording-processing:disabled{pointer-events:none}
