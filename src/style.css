@@ -135,7 +135,7 @@ button{border:0;cursor:pointer}
 
 /* Click-to-select participant boxes */
 .participant-selectable{cursor:pointer;outline:0;transition:background .15s ease,box-shadow .15s ease,outline-color .15s ease}
-.participant-selectable:focus-visible{outline:4px solid #2d8cff;outline-offset:-2px}
-.participant-selectable.selected{outline:4px solid #2d8cff;outline-offset:-2px;background:#f3f8ff}
-.my-participant-card.selected{background:#f3f8ff}
-.participant-list-row.selected:hover{background:#f3f8ff}
+.participant-selectable:focus-visible{outline:4px solid #2d8cff;outline-offset:-2px;box-shadow:inset 0 0 0 4px #2d8cff}
+.participant-selectable.selected{outline:4px solid #2d8cff !important;outline-offset:-2px;background:#f3f8ff;box-shadow:inset 0 0 0 4px #2d8cff !important}
+.my-participant-card.selected{background:#f3f8ff;box-shadow:inset 0 0 0 4px #2d8cff !important}
+.participant-list-row.selected,.participant-list-row.selected:hover{background:#f3f8ff;box-shadow:inset 0 0 0 4px #2d8cff !important}
