@@ -139,3 +139,11 @@ button{border:0;cursor:pointer}
 .participant-selectable.selected{outline:4px solid #2d8cff !important;outline-offset:-2px;background:#f3f8ff;box-shadow:inset 0 0 0 4px #2d8cff !important}
 .my-participant-card.selected{background:#f3f8ff;box-shadow:inset 0 0 0 4px #2d8cff !important}
 .participant-list-row.selected,.participant-list-row.selected:hover{background:#f3f8ff;box-shadow:inset 0 0 0 4px #2d8cff !important}
+
+/* Participants control selection */
+.meeting-controls .control-btn[data-action="toggle-participants"].selected{
+  outline:4px solid #2d8cff !important;
+  outline-offset:-3px;
+  box-shadow:inset 0 0 0 2px #2d8cff !important;
+  background:rgba(45,140,255,.14) !important;
+}
