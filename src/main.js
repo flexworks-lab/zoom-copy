@@ -4392,36 +4392,7 @@ function bind() {
       }
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
-  document.querySelectorAll(".fake-person-selectable").forEach(function(box) {
-    const applySelection = function(selected) {
-      box.classList.toggle("selected", selected);
-      box.setAttribute("aria-pressed", selected ? "true" : "false");
-      box.style.outline = selected ? "4px solid #2d8cff" : "none";
-      box.style.outlineOffset = "-2px";
-      box.style.boxShadow = selected ? "inset 0 0 0 4px #2d8cff" : "none";
-      box.style.backgroundColor = selected ? "#f3f8ff" : "";
-    };
-
-    const toggleSelection = function(event) {
-      if (event.target.closest("button, input, textarea, select, a")) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const personId = box.dataset.participantSelect;
-      if (!personId) return;
-      const selected = !state.selectedParticipants[personId];
-      state.selectedParticipants[personId] = selected;
-      applySelection(selected);
-    };
-
-    applySelection(!!state.selectedParticipants[box.dataset.participantSelect]);
-    box.addEventListener("pointerdown", toggleSelection);
-    box.addEventListener("keydown", function(event) {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      toggleSelection(event);
-    });
-  });
-
-  document.querySelectorAll("video.participant-video").forEach(function(v) {
+        document.querySelectorAll("video.participant-video").forEach(function(v) {
           const person = getParticipant(v.dataset.personId);
           v.muted = !state.audioEnabled || !isPersonAudioOn(person);
           v.volume = 1;
@@ -4470,6 +4441,40 @@ function bind() {
       render();
     });
   });
+  document.querySelectorAll(".fake-person-selectable").forEach(function(box) {
+    const toggleSelection = function(event) {
+      if (event.target.closest("button, input, textarea, select, a")) return;
+
+      const personId = box.dataset.participantSelect;
+      if (!personId) return;
+
+      const selected = !state.selectedParticipants[personId];
+      state.selectedParticipants[personId] = selected;
+      box.classList.toggle("selected", selected);
+      box.setAttribute("aria-pressed", selected ? "true" : "false");
+      box.style.outline = selected ? "4px solid #2d8cff" : "none";
+      box.style.outlineOffset = "-4px";
+      box.style.boxShadow = selected ? "inset 0 0 0 4px #2d8cff" : "none";
+      box.style.backgroundColor = selected ? "#f3f8ff" : "";
+    };
+
+    box.addEventListener("click", toggleSelection);
+    box.addEventListener("keydown", function(event) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleSelection(event);
+    });
+
+    const personId = box.dataset.participantSelect;
+    const selected = !!state.selectedParticipants[personId];
+    box.classList.toggle("selected", selected);
+    box.setAttribute("aria-pressed", selected ? "true" : "false");
+    box.style.outline = selected ? "4px solid #2d8cff" : "none";
+    box.style.outlineOffset = "-4px";
+    box.style.boxShadow = selected ? "inset 0 0 0 4px #2d8cff" : "none";
+    box.style.backgroundColor = selected ? "#f3f8ff" : "";
+  });
+
   document.querySelectorAll("video.participant-video").forEach(function(v) {
     wireParticipantVideo(v);
   });
