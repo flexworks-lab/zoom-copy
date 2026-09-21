@@ -4636,16 +4636,33 @@ window.addEventListener("keydown", function(e) {
 });
 
 async function bootMeetingApp() {
-  await loadAccount();
-  await loadSavedMeetingLibrary();
-  const restored = await restoreSavedMeeting();
   normalizeHosts();
   render();
-  if (restored) {
-    restorePersistedPlayback();
-    startHostRoom();
-  }
   showFirstTimeTutorial();
+
+  try {
+    await loadAccount();
+  } catch (error) {
+    console.warn("Account startup load failed.", error);
+  }
+
+  try {
+    await loadSavedMeetingLibrary();
+  } catch (error) {
+    console.warn("Saved meeting library startup load failed.", error);
+  }
+
+  try {
+    const restored = await restoreSavedMeeting();
+    if (restored) {
+      normalizeHosts();
+      render();
+      restorePersistedPlayback();
+      startHostRoom();
+    }
+  } catch (error) {
+    console.warn("Saved meeting background restore failed.", error);
+  }
 }
 
 window.addEventListener("visibilitychange", function() {
