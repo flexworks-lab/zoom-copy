@@ -4393,20 +4393,32 @@ function bind() {
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
         document.querySelectorAll(".participant-selectable").forEach(function(box) {
-    const toggleSelection = function(event) {
-      if (event.target.closest("button, input, textarea, select, a")) return;
-      const personId = box.dataset.participantSelect;
-      if (!personId) return;
-      state.selectedParticipants[personId] = !state.selectedParticipants[personId];
-      const selected = !!state.selectedParticipants[personId];
+    const applySelection = function(selected) {
       box.classList.toggle("selected", selected);
       box.setAttribute("aria-pressed", selected ? "true" : "false");
+      box.style.outline = selected ? "4px solid #2d8cff" : "none";
+      box.style.outlineOffset = "-2px";
+      box.style.boxShadow = selected ? "inset 0 0 0 4px #2d8cff" : "none";
+      box.style.backgroundColor = selected ? "#f3f8ff" : "";
     };
 
-    box.addEventListener("click", toggleSelection);
+    const toggleSelection = function(event) {
+      if (event.target.closest("button, input, textarea, select, a")) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const personId = box.dataset.participantSelect;
+      if (!personId) return;
+
+      const selected = !state.selectedParticipants[personId];
+      state.selectedParticipants[personId] = selected;
+      applySelection(selected);
+    };
+
+    applySelection(!!state.selectedParticipants[box.dataset.participantSelect]);
+    box.addEventListener("pointerdown", toggleSelection);
     box.addEventListener("keydown", function(event) {
       if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
       toggleSelection(event);
     });
   });
