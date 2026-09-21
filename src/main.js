@@ -4446,9 +4446,9 @@ function bind() {
     const applyTileSelection = function(selected) {
       tile.classList.toggle("selected-participant-tile", selected);
       tile.setAttribute("aria-pressed", selected ? "true" : "false");
-      tile.style.outline = selected ? "8px solid #2d8cff" : "none";
-      tile.style.outlineOffset = "-8px";
-      tile.style.boxShadow = selected ? "inset 0 0 0 8px #2d8cff" : "none";
+      tile.style.outline = "none";
+      tile.style.outlineOffset = "0";
+      tile.style.boxShadow = selected ? "inset 0 0 0 12px #2d8cff" : "none";
     };
 
     const toggleTileSelection = function(event) {
