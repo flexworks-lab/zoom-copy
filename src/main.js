@@ -3621,6 +3621,20 @@ function drawRecordingFrame() {
     ctx.fillRect(x, y, tileWidth, tileHeight);
     ctx.restore();
 
+    // Record the same participant selection outline that is shown around
+    // the live video tile. Draw it on top of the video so it is included
+    // in the exported MP4.
+    if (state.selectedParticipants[person.id]) {
+      ctx.save();
+      ctx.strokeStyle = "#2d8cff";
+      ctx.lineWidth = 8;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      roundedRectPath(ctx, x + 4, y + 4, tileWidth - 8, tileHeight - 8, 8);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Keep the normal participant name/status visible, but do not record
     // Cam key, Next key, Audio key badges, or the Edit button.
     drawRecordingLabel(ctx, person, x, y, tileWidth, tileHeight);
