@@ -2670,7 +2670,7 @@ function renderParticipants() {
       const videos = getVideos(p);
       const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
-      return '<div class="participant-list-row participant-selectable ' + (state.selectedParticipants[p.id] ? "selected" : "") + '" data-participant-select="' + escapeHtml(p.id) + '" role="button" tabindex="0" aria-pressed="' + (state.selectedParticipants[p.id] ? "true" : "false") + '"><div class="avatar" style="--hue:' + p.hue + '">' + avatarMarkup(p, "avatar-image") + (p.avatarUrl ? '' : '<span>' + escapeHtml(p.initials) + '</span>') + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div>' + (p.id !== state.hostId ? '<button class="host-mini" data-action="make-host" data-person-id="' + p.id + '">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      return '<div class="participant-list-row fake-person-selectable ' + (state.selectedParticipants[p.id] ? "selected" : "") + '" data-participant-select="' + escapeHtml(p.id) + '" role="button" tabindex="0" aria-pressed="' + (state.selectedParticipants[p.id] ? "true" : "false") + '"><div class="avatar" style="--hue:' + p.hue + '">' + avatarMarkup(p, "avatar-image") + (p.avatarUrl ? '' : '<span>' + escapeHtml(p.initials) + '</span>') + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div>' + (p.id !== state.hostId ? '<button class="host-mini" data-action="make-host" data-person-id="' + p.id + '">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
@@ -4392,7 +4392,7 @@ function bind() {
       }
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
-        document.querySelectorAll(".participant-selectable").forEach(function(box) {
+  document.querySelectorAll(".fake-person-selectable").forEach(function(box) {
     const applySelection = function(selected) {
       box.classList.toggle("selected", selected);
       box.setAttribute("aria-pressed", selected ? "true" : "false");
@@ -4406,10 +4406,8 @@ function bind() {
       if (event.target.closest("button, input, textarea, select, a")) return;
       event.preventDefault();
       event.stopPropagation();
-
       const personId = box.dataset.participantSelect;
       if (!personId) return;
-
       const selected = !state.selectedParticipants[personId];
       state.selectedParticipants[personId] = selected;
       applySelection(selected);
