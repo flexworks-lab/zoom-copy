@@ -2529,7 +2529,8 @@ function participantTile(person) {
 
   const mutedBadge = !isPersonAudioOn(person) ? '<span class="muted-audio-badge">' + icon("micOff") + '<span>Muted</span></span>' : "";
   const hiddenBadge = !isCameraVisible(person) && videoCount ? '<span class="camera-hidden-badge">CAM OFF</span>' : "";
-  return '<article class="participant-tile" data-person-id="' + person.id + '">' + media + '<div class="tile-scrim"></div>' + keybindBadges + hiddenBadge + mutedBadge +
+  const tileSelected = !!state.selectedParticipants[person.id];
+  return '<article class="participant-tile' + (tileSelected ? ' selected-participant-tile' : '') + '" data-person-id="' + person.id + '" tabindex="0" role="button" aria-pressed="' + (tileSelected ? 'true' : 'false') + '">' + media + '<div class="tile-scrim"></div>' + keybindBadges + hiddenBadge + mutedBadge +
     '<div class="participant-label"><span class="status-dot"></span><span>' + escapeHtml(person.name) + '</span>' +
     (person.role ? '<em>' + escapeHtml(person.role) + '</em>' : "") + '</div>' +
     (videoCount ? '<div class="clip-controls">' +
@@ -4441,6 +4442,36 @@ function bind() {
       render();
     });
   });
+  document.querySelectorAll(".participant-tile[data-person-id]").forEach(function(tile) {
+    const applyTileSelection = function(selected) {
+      tile.classList.toggle("selected-participant-tile", selected);
+      tile.setAttribute("aria-pressed", selected ? "true" : "false");
+      tile.style.outline = selected ? "5px solid #2d8cff" : "none";
+      tile.style.outlineOffset = "-5px";
+      tile.style.boxShadow = selected ? "inset 0 0 0 5px #2d8cff" : "none";
+    };
+
+    const toggleTileSelection = function(event) {
+      if (event.target.closest("button, input, textarea, select, a")) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const personId = tile.dataset.personId;
+      if (!personId) return;
+
+      const selected = !state.selectedParticipants[personId];
+      state.selectedParticipants[personId] = selected;
+      applyTileSelection(selected);
+    };
+
+    applyTileSelection(!!state.selectedParticipants[tile.dataset.personId]);
+    tile.addEventListener("click", toggleTileSelection);
+    tile.addEventListener("keydown", function(event) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      toggleTileSelection(event);
+    });
+  });
+
   document.querySelectorAll(".fake-person-selectable").forEach(function(box) {
     const toggleSelection = function(event) {
       if (event.target.closest("button, input, textarea, select, a")) return;
