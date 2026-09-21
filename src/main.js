@@ -71,6 +71,7 @@ const state = {
   myAvatarUrl: null,
   participantSearch: "",
   participantOptionsOpen: false,
+  selectedParticipants: {},
   roomMode: "local",
   remoteMeetingId: "",
   savedMeetings: [],
@@ -2656,7 +2657,7 @@ function renderParticipants() {
   const myVideos = state.myVideos || [];
   const myAudioText = state.myAudioOn ? "Audio on" : "Audio off";
   return '<aside class="side-panel participants-panel"><div class="panel-header"><div><strong>Participants</strong><span>' + (state.fakePeople.length + 1) + ' in meeting</span></div><div class="panel-header-actions"><button class="panel-option-toggle" data-action="toggle-participant-options" aria-expanded="' + (state.participantOptionsOpen ? "true" : "false") + '">Options</button><button class="panel-close" data-action="toggle-participants">×</button></div></div>' +
-    '<div class="my-participant-card"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back" data-person-id="me">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
+    '<div class="my-participant-card participant-selectable ' + (state.selectedParticipants.me ? "selected" : "") + '" data-participant-select="me" role="button" tabindex="0" aria-pressed="' + (state.selectedParticipants.me ? "true" : "false") + '"><div class="avatar" style="--hue:145">' + avatarMarkup({ id: "me", name: state.displayName }, "avatar-image") + (state.myAvatarUrl ? '' : '<span>MC</span>') + '</div><div><strong>' + safeDisplayName + '</strong><span>' + (state.hostId === "me" ? "Host" : "Participant") + '</span></div><div class="participant-row-actions">' + (state.hostId !== "me" ? '<button class="host-mini" data-action="make-host" data-person-id="me">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="me">Edit</button>' + (state.myParticipantHidden ? '<button class="join-mini" data-action="join-back" data-person-id="me">Join Back</button>' : '<button class="leave-mini" data-action="leave-person" data-person-id="me">Leave</button>') + '</div></div>' +
     '<button class="add-person" data-action="add-person"><span>+</span><strong>Add fake person</strong><small>Custom name + multiple videos</small></button>' +
     (state.participantOptionsOpen ? '<div class="participant-options"><div class="participant-options-title"><strong>Participant options</strong><button class="options-close" data-action="toggle-participant-options">Done</button></div>' +
       '<div class="global-video-shortcut"><div><strong>Pause / resume all videos</strong><small>Toggle every active clip with one key.</small></div><input class="global-keybind-input" data-pause-all-keybind value="' + escapeHtml((state.pauseAllKeybind || "").toUpperCase()) + '" placeholder="P" maxlength="1" autocomplete="off" aria-label="Pause all videos keybind"></div>' +
@@ -2669,7 +2670,7 @@ function renderParticipants() {
       const videos = getVideos(p);
       const cameraText = videos.length ? (p.cameraVisible === false ? " · Camera hidden" : " · " + videos.length + " video" + (videos.length === 1 ? "" : "s")) : " · No camera";
       const hostText = p.id === state.hostId ? "Host" : "Participant";
-      return '<div class="participant-list-row"><div class="avatar" style="--hue:' + p.hue + '">' + avatarMarkup(p, "avatar-image") + (p.avatarUrl ? '' : '<span>' + escapeHtml(p.initials) + '</span>') + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div>' + (p.id !== state.hostId ? '<button class="host-mini" data-action="make-host" data-person-id="' + p.id + '">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
+      return '<div class="participant-list-row participant-selectable ' + (state.selectedParticipants[p.id] ? "selected" : "") + '" data-participant-select="' + escapeHtml(p.id) + '" role="button" tabindex="0" aria-pressed="' + (state.selectedParticipants[p.id] ? "true" : "false") + '"><div class="avatar" style="--hue:' + p.hue + '">' + avatarMarkup(p, "avatar-image") + (p.avatarUrl ? '' : '<span>' + escapeHtml(p.initials) + '</span>') + '</div><div><strong>' + escapeHtml(p.name) + '</strong><span>' + hostText + cameraText + (p.audioOn === false ? " · Muted" : "") + '</span></div><div class="participant-row-actions"><div class="row-icons">' + icon(p.audioOn === false ? "micOff" : "mic") + icon(videos.length && p.cameraVisible !== false ? "video" : "videoOff") + '</div>' + (p.id !== state.hostId ? '<button class="host-mini" data-action="make-host" data-person-id="' + p.id + '">Make Host</button>' : '<span class="host-status">Host</span>') + '<button class="edit-mini" data-action="edit-person" data-person-id="' + p.id + '">Edit</button></div></div>';
     }).join("") +
     '</div></aside>';
 }
@@ -4391,7 +4392,26 @@ function bind() {
       }
       if (a === "toggle-audio") {
         state.audioEnabled = !state.audioEnabled;
-        document.querySelectorAll("video.participant-video").forEach(function(v) {
+        document.querySelectorAll(".participant-selectable").forEach(function(box) {
+    const toggleSelection = function(event) {
+      if (event.target.closest("button, input, textarea, select, a")) return;
+      const personId = box.dataset.participantSelect;
+      if (!personId) return;
+      state.selectedParticipants[personId] = !state.selectedParticipants[personId];
+      const selected = !!state.selectedParticipants[personId];
+      box.classList.toggle("selected", selected);
+      box.setAttribute("aria-pressed", selected ? "true" : "false");
+    };
+
+    box.addEventListener("click", toggleSelection);
+    box.addEventListener("keydown", function(event) {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggleSelection(event);
+    });
+  });
+
+  document.querySelectorAll("video.participant-video").forEach(function(v) {
           const person = getParticipant(v.dataset.personId);
           v.muted = !state.audioEnabled || !isPersonAudioOn(person);
           v.volume = 1;
